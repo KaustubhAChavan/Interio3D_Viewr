@@ -1,5 +1,6 @@
 import os
 import io
+import mimetypes
 import uuid
 import torch
 import uvicorn
@@ -18,6 +19,7 @@ from trellis.utils import postprocessing_utils
 app = FastAPI()
 GENERATED_MODELS_DIR = os.path.join(os.getcwd(), "generated_models")
 os.makedirs(GENERATED_MODELS_DIR, exist_ok=True)
+mimetypes.add_type("model/gltf-binary", ".glb")
 app.mount("/models", StaticFiles(directory=GENERATED_MODELS_DIR), name="models")
 
 print("⏳ Loading Model...")
@@ -52,6 +54,15 @@ app.add_middleware(
 @app.get("/")
 def root():
     return {"status": "✅ Backend is running!", "device": device}
+
+def get_public_base_url(request: Request):
+    forwarded_host = request.headers.get("x-forwarded-host")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+
+    if forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}"
+
+    return str(request.base_url).rstrip("/")
 
 # --- 3. CORE LOGIC ---
 def process_image_to_glb_bytes(image: Image.Image):
@@ -111,7 +122,8 @@ async def convert_image(request: Request, file: UploadFile = File(...)):
 
         await run_in_threadpool(write_model_file)
 
-        model_url = str(request.url_for("models", path=model_filename))
+        public_base_url = get_public_base_url(request)
+        model_url = f"{public_base_url}/models/{model_filename}"
         return JSONResponse(content={"model_url": model_url, "filename": model_filename})
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -119,4 +131,4 @@ async def convert_image(request: Request, file: UploadFile = File(...)):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8081)

@@ -28,6 +28,22 @@ export default function App() {
   }, [imageFile]);
 
   const hasPreview = previewMode || imageFile || loading || modelUrl;
+  const convertUrl = 'https://excavate-persecute-punctuate.ngrok-free.dev/convert';
+
+  const normalizeModelUrl = (rawModelUrl, responseUrl) => {
+    const resolvedUrl = new URL(rawModelUrl, responseUrl);
+    const responseOrigin = new URL(responseUrl).origin;
+
+    if (
+      resolvedUrl.hostname === 'localhost' ||
+      resolvedUrl.hostname === '127.0.0.1' ||
+      resolvedUrl.protocol === 'http:'
+    ) {
+      return `${responseOrigin}${resolvedUrl.pathname}${resolvedUrl.search}`;
+    }
+
+    return resolvedUrl.href;
+  };
 
   useEffect(() => {
     return () => {
@@ -87,7 +103,7 @@ export default function App() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('https://excavate-persecute-punctuate.ngrok-free.dev/convert', {
+      const response = await fetch(convertUrl, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -114,7 +130,7 @@ export default function App() {
           throw new Error('Conversion response did not include a model URL.');
         }
 
-        setPublicModelUrl(new URL(data.model_url, response.url).href);
+        setPublicModelUrl(normalizeModelUrl(data.model_url, response.url));
         return;
       }
 
