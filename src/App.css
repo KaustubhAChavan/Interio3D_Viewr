@@ -453,6 +453,15 @@ h1 {
 
 .viewer-actions {
   display: grid;
+  gap: 8px;
+}
+
+.ar-placement-note {
+  margin: 0;
+  color: #5e706b;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
 }
 
 @media (max-width: 819px) {

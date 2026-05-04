@@ -186,7 +186,7 @@ export default function App() {
                     scale={modelScale}
                     onLoad={handleModelLoad}
                     ar
-                    ar-modes="webxr scene-viewer quick-look"
+                    ar-modes="scene-viewer webxr quick-look"
                     ar-scale="fixed"
                     ar-placement="floor"
                     camera-controls
@@ -218,6 +218,7 @@ export default function App() {
                   <button type="button" className="image-action primary-action" onClick={handleViewAr}>
                     View in AR
                   </button>
+                  <p className="ar-placement-note">Move slowly until the floor is detected, then tap once to place.</p>
                 </div>
               )}
             </section>
