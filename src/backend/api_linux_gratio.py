@@ -1,12 +1,14 @@
 import os
 import io
+import uuid
 import torch
 import uvicorn
 import gradio as gr
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool # Import for non-blocking execution
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from sanitize_filename import sanitize
 from trellis.pipelines import TrellisImageTo3DPipeline
@@ -14,6 +16,9 @@ from trellis.utils import postprocessing_utils
 
 # --- 1. SETUP PIPELINE ---
 app = FastAPI()
+GENERATED_MODELS_DIR = os.path.join(os.getcwd(), "generated_models")
+os.makedirs(GENERATED_MODELS_DIR, exist_ok=True)
+app.mount("/models", StaticFiles(directory=GENERATED_MODELS_DIR), name="models")
 
 print("⏳ Loading Model...")
 
@@ -82,7 +87,7 @@ def process_image_to_glb_bytes(image: Image.Image):
 # FIX: Removed 'async' from the definition to let FastAPI use threadpool
 # OR: Keep async and use run_in_threadpool (shown below)
 @app.post("/convert")
-async def convert_image(file: UploadFile = File(...)):
+async def convert_image(request: Request, file: UploadFile = File(...)):
     try:
         original_name = file.filename
         safe_name = sanitize(original_name)
@@ -97,11 +102,17 @@ async def convert_image(file: UploadFile = File(...)):
         # CRITICAL FIX: Run heavy inference in threadpool
         glb_bytes = await run_in_threadpool(process_image_to_glb_bytes, image)
 
-        return Response(
-            content=glb_bytes,
-            media_type="model/gltf-binary",
-            headers={"Content-Disposition": f'attachment; filename="{base_name}.glb"'}
-        )
+        model_filename = f"{base_name}-{uuid.uuid4().hex}.glb"
+        model_path = os.path.join(GENERATED_MODELS_DIR, model_filename)
+
+        def write_model_file():
+            with open(model_path, "wb") as model_file:
+                model_file.write(glb_bytes)
+
+        await run_in_threadpool(write_model_file)
+
+        model_url = str(request.url_for("models", path=model_filename))
+        return JSONResponse(content={"model_url": model_url, "filename": model_filename})
     except Exception as e:
         print(f"❌ Error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})

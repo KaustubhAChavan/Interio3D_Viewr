@@ -6,6 +6,7 @@ export default function App() {
   const [imageFile, setImageFile] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
   const [glbBlob, setGlbBlob] = useState(null);
+  const [publicModelUrl, setPublicModelUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modelScale, setModelScale] = useState('1 1 1');
@@ -14,10 +15,12 @@ export default function App() {
   const uploadRequestRef = useRef(0);
   const abortRef = useRef(null);
 
-  const modelUrl = useMemo(() => {
+  const objectModelUrl = useMemo(() => {
     if (!glbBlob) return null;
     return URL.createObjectURL(glbBlob);
   }, [glbBlob]);
+
+  const modelUrl = publicModelUrl || objectModelUrl;
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
@@ -28,9 +31,9 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (modelUrl) URL.revokeObjectURL(modelUrl);
+      if (objectModelUrl) URL.revokeObjectURL(objectModelUrl);
     };
-  }, [modelUrl]);
+  }, [objectModelUrl]);
 
   useEffect(() => {
     return () => {
@@ -56,6 +59,7 @@ export default function App() {
     setImageFile(null);
     setPreviewMode(false);
     setGlbBlob(null);
+    setPublicModelUrl(null);
     setLoading(false);
     setError(null);
     setModelScale('1 1 1');
@@ -76,6 +80,7 @@ export default function App() {
     setError(null);
     setLoading(true);
     setGlbBlob(null);
+    setPublicModelUrl(null);
     setModelScale('1 1 1');
 
     try {
@@ -92,6 +97,25 @@ export default function App() {
 
       if (!response.ok) {
         throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+
+      if (contentType.includes('application/json')) {
+        const data = await response.json();
+
+        if (requestId !== uploadRequestRef.current) return;
+
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        if (!data.model_url) {
+          throw new Error('Conversion response did not include a model URL.');
+        }
+
+        setPublicModelUrl(new URL(data.model_url, response.url).href);
+        return;
       }
 
       const blob = await response.blob();
@@ -186,7 +210,7 @@ export default function App() {
                     scale={modelScale}
                     onLoad={handleModelLoad}
                     ar
-                    ar-modes="scene-viewer webxr quick-look"
+                    ar-modes="scene-viewer quick-look webxr"
                     ar-scale="fixed"
                     ar-placement="floor"
                     camera-controls
@@ -283,7 +307,7 @@ export default function App() {
                   {error}
                 </>
               )}
-              {glbBlob && !loading && (
+              {modelUrl && !loading && (
                 <>
                   <span className="status-dot is-ready" />
                   Model ready for 3D and AR viewing.
