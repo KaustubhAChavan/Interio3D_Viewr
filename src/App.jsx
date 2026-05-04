@@ -29,7 +29,7 @@ export default function App() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('https://unovert-unengaged-edwardo.ngrok-free.dev/convert', {
+      const response = await fetch('https://excavate-persecute-punctuate.ngrok-free.dev/convert', {
         method: 'POST',
         body: formData,
       });
