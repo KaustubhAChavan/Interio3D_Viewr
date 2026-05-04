@@ -3,9 +3,9 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: dark; /* AR apps look better in dark mode */
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #000000; /* Match your app background */
+  color-scheme: light;
+  color: #14201d;
+  background-color: #f5fbf8;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,22 +13,20 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 
-   FIX: Removed 'display: flex' and 'place-items: center' 
-   so the app can take up the full screen height/width.
-*/
 body {
   margin: 0;
   padding: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden; /* Prevents scrolling while rotating 3D models */
+  width: 100%;
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
 }
 
-/* Ensure the React root div fills the body */
 #root {
   width: 100%;
-  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 a {

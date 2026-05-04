@@ -1,25 +1,52 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import '@google/model-viewer';
 import './App.css';
 
 export default function App() {
   const [imageFile, setImageFile] = useState(null);
+  const [previewMode, setPreviewMode] = useState(false);
   const [glbBlob, setGlbBlob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modelScale, setModelScale] = useState('1 1 1');
   const modelRef = useRef(null);
+  const previewRef = useRef(null);
 
   const modelUrl = useMemo(() => {
     if (!glbBlob) return null;
     return URL.createObjectURL(glbBlob);
   }, [glbBlob]);
 
+  const imagePreviewUrl = useMemo(() => {
+    if (!imageFile) return null;
+    return URL.createObjectURL(imageFile);
+  }, [imageFile]);
+
+  const hasPreview = previewMode || imageFile || loading || modelUrl;
+
+  useEffect(() => {
+    return () => {
+      if (modelUrl) URL.revokeObjectURL(modelUrl);
+    };
+  }, [modelUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    };
+  }, [imagePreviewUrl]);
+
+  useEffect(() => {
+    if (!hasPreview) return;
+    previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [hasPreview]);
+
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setImageFile(file);
+    setPreviewMode(true);
     setError(null);
     setLoading(true);
     setGlbBlob(null);
@@ -53,6 +80,10 @@ export default function App() {
     }
   };
 
+  const handleViewAr = () => {
+    modelRef.current?.activateAR?.();
+  };
+
   const handleModelLoad = () => {
     const model = modelRef.current;
     if (!model) return;
@@ -69,7 +100,7 @@ export default function App() {
 
   return (
     <main className="design-app">
-      <div className={`app-shell ${imageFile || loading || modelUrl ? 'has-viewer' : ''}`}>
+      <div className={`app-shell ${hasPreview ? 'has-viewer' : ''}`}>
         <header className="app-header">
           <div className="brand-block">
             <span className="brand-mark">ID</span>
@@ -85,16 +116,80 @@ export default function App() {
           </div>
         </header>
 
-        <section className={`app-workspace ${imageFile || loading || modelUrl ? 'has-viewer' : ''}`}>
+        <section className={`app-workspace ${hasPreview ? 'has-viewer' : ''}`}>
+          {hasPreview && (
+            <section className="viewer-panel" aria-label="3D model preview" ref={previewRef}>
+              <div className="viewer-toolbar">
+                <div>
+                  <span>{loading ? 'Generating preview' : modelUrl ? '3D preview' : 'Image selected'}</span>
+                  <strong>{loading ? 'Creating your model' : modelUrl ? 'Model ready' : 'Preparing conversion'}</strong>
+                </div>
+                {modelUrl && (
+                  <button type="button" className="toolbar-ar-button" onClick={handleViewAr}>
+                    AR
+                  </button>
+                )}
+              </div>
+
+              <div className="viewer-surface">
+                {loading ? (
+                  <div className="loading-state">
+                    {imagePreviewUrl && <img src={imagePreviewUrl} alt="Uploaded preview" />}
+                    <div className="spinner" />
+                    <p>Building your 3D preview...</p>
+                  </div>
+                ) : modelUrl ? (
+                  <model-viewer
+                    ref={modelRef}
+                    src={modelUrl}
+                    scale={modelScale}
+                    onLoad={handleModelLoad}
+                    ar
+                    ar-modes="webxr scene-viewer quick-look"
+                    ar-scale="auto"
+                    ar-placement="floor"
+                    camera-controls
+                    auto-rotate
+                    shadow-intensity="1"
+                    environment-image="neutral"
+                    exposure="0.9"
+                    camera-orbit="0deg 75deg 2.4m"
+                    field-of-view="30deg"
+                    style={{ width: '100%', height: '100%' }}
+                  >
+                    <button slot="ar-button" className="ar-button">
+                      View in AR
+                    </button>
+                  </model-viewer>
+                ) : (
+                  <div className="pending-preview">
+                    {imagePreviewUrl && (
+                      <img src={imagePreviewUrl} alt="Selected image waiting for 3D conversion" />
+                    )}
+                    <strong>3D preview will appear here.</strong>
+                    <p>Your image is uploaded. Keep this screen open while the model is generated.</p>
+                  </div>
+                )}
+              </div>
+
+              {modelUrl && (
+                <div className="viewer-actions">
+                  <button type="button" className="image-action primary-action" onClick={handleViewAr}>
+                    View in AR
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+
           <section className="studio-panel" aria-label="Interior AI designer controls">
             <div className="content-stack">
               <p className="eyebrow">Photo to AR</p>
-              <h1>Scan from mobile. Generate for AR.</h1>
+              <h1>{hasPreview ? 'Upload another image' : 'Create a mobile AR model'}</h1>
               <p className="intro-copy">
-                Upload an image to create the AR-ready 3D model.
-              </p>
-              <p className="device-note">
-                Desktop supports 2D to 3D preview. For full scan-to-AR placement, open this app on mobile.
+                {hasPreview
+                  ? 'Your preview screen is above. Replace the image anytime.'
+                  : 'Upload an image and this app will open the 3D preview screen automatically.'}
               </p>
             </div>
 
@@ -120,7 +215,7 @@ export default function App() {
 
               {imageFile && (
                 <div className="preview-card">
-                  <img src={URL.createObjectURL(imageFile)} alt="Uploaded image preview" />
+                  <img src={imagePreviewUrl} alt="Uploaded image preview" />
                   <div>
                     <span>Selected image</span>
                     <strong>{imageFile.name}</strong>
@@ -156,58 +251,6 @@ export default function App() {
               )}
             </div>
           </section>
-
-          {(imageFile || loading || modelUrl) && (
-            <section className="viewer-panel" aria-label="3D model viewer">
-              <div className="viewer-toolbar">
-                <div>
-                  <span>{loading ? 'Processing' : modelUrl ? 'Model generated' : 'Desktop preview'}</span>
-                  <strong>{loading ? 'Creating 3D model' : modelUrl ? '3D preview ready' : 'Waiting for conversion'}</strong>
-                </div>
-              </div>
-
-              <div className="viewer-surface">
-                {loading ? (
-                  <div className="loading-state">
-                    <div className="spinner" />
-                    <p>Building your AR preview...</p>
-                  </div>
-                ) : modelUrl ? (
-                  <model-viewer
-                    ref={modelRef}
-                    src={modelUrl}
-                    scale={modelScale}
-                    onLoad={handleModelLoad}
-                    ar
-                    ar-modes="webxr scene-viewer"
-                    ar-scale="auto"
-                    ar-placement="floor"
-                    camera-controls
-                    auto-rotate
-                    shadow-intensity="1"
-                    environment-image="neutral"
-                    exposure="0.9"
-                    style={{ width: '100%', height: '100%' }}
-                  >
-                    <button slot="ar-button" className="ar-button">
-                      View in AR
-                    </button>
-                  </model-viewer>
-                ) : (
-                  <div className="pending-preview">
-                    {imageFile && (
-                      <img src={URL.createObjectURL(imageFile)} alt="Selected image waiting for 3D conversion" />
-                    )}
-                    <strong>3D preview will appear here after conversion.</strong>
-                    <p>On desktop you can inspect the generated model. Use mobile for camera scanning and AR placement.</p>
-                  </div>
-                )}
-              </div>
-              {modelUrl && (
-                <p className="mobile-note">On desktop you can inspect the 3D model. Open on mobile to continue into AR placement.</p>
-              )}
-            </section>
-          )}
         </section>
       </div>
     </main>
