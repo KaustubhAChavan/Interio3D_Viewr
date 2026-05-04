@@ -240,6 +240,10 @@ h1 {
   gap: 10px;
 }
 
+.action-row.single-action {
+  grid-template-columns: 1fr;
+}
+
 .image-action {
   min-height: 48px;
   display: grid;
