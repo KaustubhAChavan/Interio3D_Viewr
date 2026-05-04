@@ -13,6 +13,7 @@ export default function App() {
   const modelRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const captureInputRef = useRef(null);
 
   const modelUrl = useMemo(() => {
     if (!glbBlob) return null;
@@ -114,11 +115,29 @@ export default function App() {
     }
   };
 
-  const handleCameraCapture = () => {
+  const handleCaptureClick = () => {
+    if (loading) return;
+
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobileDevice && captureInputRef.current) {
+      captureInputRef.current.click();
+      return;
+    }
+
+    handleCameraOpen();
+  };
+
+  const handleCameraCapture = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
     if (!video || !canvas) return;
+
+    if (!video.videoWidth || !video.videoHeight) {
+      setError('Camera is still starting. Please wait a moment and try again.');
+      return;
+    }
 
     const width = video.videoWidth || 1280;
     const height = video.videoHeight || 720;
@@ -128,16 +147,26 @@ export default function App() {
     const context = canvas.getContext('2d');
     context.drawImage(video, 0, 0, width, height);
 
-    canvas.toBlob(async (blob) => {
-      if (!blob) {
-        setError('Unable to capture photo. Please try again.');
+    const blob = await new Promise((resolve) => {
+      if (canvas.toBlob) {
+        canvas.toBlob(resolve, 'image/jpeg', 0.92);
         return;
       }
 
-      const file = new File([blob], `camera-capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      stopCamera();
-      await processImageFile(file);
-    }, 'image/jpeg', 0.92);
+      fetch(canvas.toDataURL('image/jpeg', 0.92))
+        .then((response) => response.blob())
+        .then(resolve)
+        .catch(() => resolve(null));
+    });
+
+    if (!blob) {
+      setError('Unable to capture photo. Please try again.');
+      return;
+    }
+
+    const file = new File([blob], `camera-capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    stopCamera();
+    await processImageFile(file);
   };
 
   const handleModelLoad = () => {
@@ -205,11 +234,20 @@ export default function App() {
                   <button
                     type="button"
                     className="image-action secondary-action"
-                    onClick={handleCameraOpen}
+                    onClick={handleCaptureClick}
                     disabled={loading}
                   >
                     Capture Image
                   </button>
+                  <input
+                    ref={captureInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleImageUpload}
+                    disabled={loading}
+                    style={{ display: 'none' }}
+                  />
                 </div>
                 <p className="capture-hint">Capture is best on mobile. Desktop browsers may block camera permission.</p>
               </div>
