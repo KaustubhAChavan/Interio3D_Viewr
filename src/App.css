@@ -327,6 +327,13 @@ h1 {
   gap: 10px;
 }
 
+.viewer-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .toolbar-ar-button {
   width: 46px;
   height: 40px;
@@ -338,6 +345,20 @@ h1 {
   color: #ffffff;
   font-size: 13px;
   font-weight: 900;
+}
+
+.toolbar-home-button {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(20, 32, 29, 0.12);
+  border-radius: 8px;
+  padding: 0;
+  background: #ffffff;
+  color: #14201d;
+  font-size: 16px;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(20, 32, 29, 0.08);
 }
 
 .viewer-surface {
@@ -712,6 +733,15 @@ h1 {
   .toolbar-ar-button {
     width: 40px;
     height: 34px;
+  }
+
+  .toolbar-home-button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .viewer-toolbar-actions {
+    gap: 6px;
   }
 
   .viewer-actions .image-action,

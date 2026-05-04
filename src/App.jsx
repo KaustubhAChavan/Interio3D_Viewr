@@ -11,6 +11,8 @@ export default function App() {
   const [modelScale, setModelScale] = useState('1 1 1');
   const modelRef = useRef(null);
   const previewRef = useRef(null);
+  const uploadRequestRef = useRef(0);
+  const abortRef = useRef(null);
 
   const modelUrl = useMemo(() => {
     if (!glbBlob) return null;
@@ -41,9 +43,33 @@ export default function App() {
     previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [hasPreview]);
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const resetToHome = () => {
+    uploadRequestRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setImageFile(null);
+    setPreviewMode(false);
+    setGlbBlob(null);
+    setLoading(false);
+    setError(null);
+    setModelScale('1 1 1');
+  };
+
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    uploadRequestRef.current += 1;
+    const requestId = uploadRequestRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setImageFile(file);
     setPreviewMode(true);
@@ -59,13 +85,18 @@ export default function App() {
       const response = await fetch('https://excavate-persecute-punctuate.ngrok-free.dev/convert', {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
+
+      if (requestId !== uploadRequestRef.current) return;
 
       if (!response.ok) {
         throw new Error(`API Error: ${response.status} ${response.statusText}`);
       }
 
       const blob = await response.blob();
+
+      if (requestId !== uploadRequestRef.current) return;
 
       if (blob.type === 'application/json') {
         const errorData = await blob.text();
@@ -74,9 +105,14 @@ export default function App() {
 
       setGlbBlob(blob);
     } catch (err) {
+      if (err.name === 'AbortError' || requestId !== uploadRequestRef.current) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (requestId === uploadRequestRef.current) {
+        setLoading(false);
+        abortRef.current = null;
+      }
+      e.target.value = '';
     }
   };
 
@@ -124,11 +160,16 @@ export default function App() {
                   <span>{loading ? 'Generating preview' : modelUrl ? '3D preview' : 'Image selected'}</span>
                   <strong>{loading ? 'Creating your model' : modelUrl ? 'Model ready' : 'Preparing conversion'}</strong>
                 </div>
-                {modelUrl && (
-                  <button type="button" className="toolbar-ar-button" onClick={handleViewAr}>
-                    AR
+                <div className="viewer-toolbar-actions">
+                  {modelUrl && (
+                    <button type="button" className="toolbar-ar-button" onClick={handleViewAr}>
+                      AR
+                    </button>
+                  )}
+                  <button type="button" className="toolbar-home-button" onClick={resetToHome} aria-label="Return to home">
+                    X
                   </button>
-                )}
+                </div>
               </div>
 
               <div className="viewer-surface">
@@ -185,15 +226,18 @@ export default function App() {
           <section className="studio-panel" aria-label="Interior AI designer controls">
             <div className="content-stack">
               <p className="eyebrow">Photo to AR</p>
-              <h1>{hasPreview ? 'Upload another image' : 'Create a mobile AR model'}</h1>
+              <h1>{loading ? 'Generating 3D preview' : hasPreview ? 'Preview ready' : 'Create a mobile AR model'}</h1>
               <p className="intro-copy">
-                {hasPreview
+                {loading
+                  ? 'Please wait while your AR-ready model is being created.'
+                  : hasPreview
                   ? 'Your preview screen is above. Replace the image anytime.'
                   : 'Upload an image and this app will open the 3D preview screen automatically.'}
               </p>
             </div>
 
-            <div className="upload-zone">
+            {!loading && (
+              <div className="upload-zone">
               <div className={`upload-card ${loading ? 'is-disabled' : ''}`}>
                 <span className="upload-icon">+</span>
                 <div>
@@ -222,7 +266,8 @@ export default function App() {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            )}
 
             <div className="status-strip" role="status">
               {loading && (
