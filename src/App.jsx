@@ -187,10 +187,10 @@ export default function App() {
                     onLoad={handleModelLoad}
                     ar
                     ar-modes="webxr scene-viewer quick-look"
-                    ar-scale="auto"
+                    ar-scale="fixed"
                     ar-placement="floor"
                     camera-controls
-                    auto-rotate
+                    interaction-prompt="none"
                     shadow-intensity="1"
                     environment-image="neutral"
                     exposure="0.9"
