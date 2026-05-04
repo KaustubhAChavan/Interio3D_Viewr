@@ -10,8 +10,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modelScale, setModelScale] = useState('1 1 1');
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
   const modelRef = useRef(null);
   const previewRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const uploadRequestRef = useRef(0);
   const abortRef = useRef(null);
 
@@ -29,6 +33,8 @@ export default function App() {
 
   const hasPreview = previewMode || imageFile || loading || modelUrl;
   const convertUrl = 'https://excavate-persecute-punctuate.ngrok-free.dev/convert';
+  const statusTone = error ? 'error' : loading ? 'loading' : modelUrl ? 'ready' : 'idle';
+  const statusText = error ? 'Check model' : loading ? 'Generating' : modelUrl ? 'AR ready' : 'Ready';
 
   const normalizeModelUrl = (rawModelUrl, responseUrl) => {
     const resolvedUrl = new URL(rawModelUrl, responseUrl);
@@ -68,10 +74,28 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!videoRef.current || !cameraStream) return;
+
+    videoRef.current.srcObject = cameraStream;
+    videoRef.current.play();
+  }, [cameraStream]);
+
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
   const resetToHome = () => {
     uploadRequestRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
     setImageFile(null);
     setPreviewMode(false);
     setGlbBlob(null);
@@ -79,10 +103,11 @@ export default function App() {
     setLoading(false);
     setError(null);
     setModelScale('1 1 1');
+    setCameraStream(null);
+    setCameraOpen(false);
   };
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
+  const processImageFile = async (file) => {
     if (!file) return;
 
     uploadRequestRef.current += 1;
@@ -179,8 +204,76 @@ export default function App() {
         setLoading(false);
         abortRef.current = null;
       }
-      e.target.value = '';
     }
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    await processImageFile(file);
+    e.target.value = '';
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
+
+    setCameraStream(null);
+    setCameraOpen(false);
+  };
+
+  const handleCameraOpen = async () => {
+    if (loading) return;
+
+    try {
+      setError(null);
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is not supported in this browser.');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+
+      setCameraStream(stream);
+      setCameraOpen(true);
+    } catch (err) {
+      if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+        setError('Camera permission was blocked. Allow camera access, or upload an image instead.');
+      } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+        setError('No suitable camera was found. Upload an image instead.');
+      } else {
+        setError(err.message || 'Unable to open camera. Upload an image instead.');
+      }
+    }
+  };
+
+  const handleCameraCapture = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas) return;
+
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext('2d');
+    context.drawImage(video, 0, 0, width, height);
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        setError('Unable to capture photo. Please try again.');
+        return;
+      }
+
+      const file = new File([blob], `placia-capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      stopCamera();
+      await processImageFile(file);
+    }, 'image/jpeg', 0.92);
   };
 
   const handleViewAr = () => {
@@ -206,16 +299,14 @@ export default function App() {
       <div className={`app-shell ${hasPreview ? 'has-viewer' : ''}`}>
         <header className="app-header">
           <div className="brand-block">
-            <span className="brand-mark">ID</span>
+            <span className="brand-mark">P</span>
             <div>
-              <p className="eyebrow">Interio3D Studio</p>
-              <strong>Mobile AR scanner</strong>
+              <p className="eyebrow brand-title">Placia Studio</p>
             </div>
           </div>
-          <div className="header-actions" aria-hidden="true">
+          <div className={`header-status is-${statusTone}`} aria-live="polite">
             <span />
-            <span />
-            <span />
+            {statusText}
           </div>
         </header>
 
@@ -228,13 +319,8 @@ export default function App() {
                   <strong>{loading ? 'Creating your model' : modelUrl ? 'Model ready' : 'Preparing conversion'}</strong>
                 </div>
                 <div className="viewer-toolbar-actions">
-                  {modelUrl && (
-                    <button type="button" className="toolbar-ar-button" onClick={handleViewAr}>
-                      AR
-                    </button>
-                  )}
                   <button type="button" className="toolbar-home-button" onClick={resetToHome} aria-label="Return to home">
-                    X
+                    <span />
                   </button>
                 </div>
               </div>
@@ -290,29 +376,47 @@ export default function App() {
           )}
 
           <section className="studio-panel" aria-label="Interior AI designer controls">
-            <div className="content-stack">
-              <p className="eyebrow">Photo to AR</p>
-              <h1>{loading ? 'Generating 3D preview' : hasPreview ? 'Preview ready' : 'Create a mobile AR model'}</h1>
-              <p className="intro-copy">
-                {loading
-                  ? 'Please wait while your AR-ready model is being created.'
-                  : hasPreview
-                  ? 'Your preview screen is above. Replace the image anytime.'
-                  : 'Upload an image and this app will open the 3D preview screen automatically.'}
-              </p>
+            <div className="placia-hero">
+              <div className="placia-title-block">
+                <div className="placia-lockup">
+                  <p className="placia-name">Placia</p>
+                  <h1>
+                    {loading
+                      ? 'Creating your 3D model'
+                      : hasPreview
+                      ? 'Your design is ready'
+                      : 'Place your designs'}
+                  </h1>
+                </div>
+              </div>
+              <div className="hero-design" aria-hidden="true">
+                <span className="hero-arch" />
+                <span className="hero-cube hero-cube-main" />
+                <span className="hero-cube hero-cube-side" />
+                <span className="hero-floor" />
+              </div>
             </div>
 
             {!loading && (
               <div className="upload-zone">
               <div className={`upload-card ${loading ? 'is-disabled' : ''}`}>
-                <span className="upload-icon">+</span>
-                <div>
-                  <strong>{imageFile ? 'Replace selected image' : 'Add image for AR preview'}</strong>
-                  <small>Use JPG, PNG, or a camera photo</small>
+                <div className="upload-copy">
+                  <strong>{imageFile ? 'Replace design image' : 'Upload your design image'}</strong>
+                  <small>
+                    {loading
+                      ? 'Keep this screen open while Placia prepares your AR-ready model.'
+                      : hasPreview
+                      ? 'Preview it above, then open AR.'
+                      : 'Upload or capture an image for a 3D preview and AR placement.'}
+                  </small>
                 </div>
-                <div className="action-row single-action">
-                  <label className="image-action primary-action">
-                    Upload Image
+                <div className="action-row">
+                  <label className="image-action upload-choice primary-choice">
+                    <span className="choice-icon upload-choice-icon" aria-hidden="true" />
+                    <span>
+                      <strong>Upload Image</strong>
+                      <small>Choose from gallery</small>
+                    </span>
                     <input
                       type="file"
                       accept="image/*"
@@ -320,8 +424,30 @@ export default function App() {
                       disabled={loading}
                     />
                   </label>
+                  <button type="button" className="image-action upload-choice secondary-choice" onClick={handleCameraOpen}>
+                    <span className="choice-icon camera-choice-icon" aria-hidden="true" />
+                    <span>
+                      <strong>Live Capture</strong>
+                      <small>Use your camera</small>
+                    </span>
+                  </button>
                 </div>
               </div>
+
+              {cameraOpen && (
+                <div className="camera-panel">
+                  <video ref={videoRef} className="camera-preview" playsInline muted />
+                  <canvas ref={canvasRef} className="camera-canvas" />
+                  <div className="camera-actions">
+                    <button type="button" className="camera-capture" onClick={handleCameraCapture}>
+                      Capture
+                    </button>
+                    <button type="button" className="camera-close" onClick={stopCamera}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {imageFile && (
                 <div className="preview-card">
