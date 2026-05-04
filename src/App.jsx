@@ -20,7 +20,7 @@ export default function App() {
     return URL.createObjectURL(glbBlob);
   }, [glbBlob]);
 
-  const modelUrl = publicModelUrl || objectModelUrl;
+  const modelUrl = objectModelUrl || publicModelUrl;
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
@@ -107,6 +107,9 @@ export default function App() {
         method: 'POST',
         body: formData,
         signal: controller.signal,
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+        },
       });
 
       if (requestId !== uploadRequestRef.current) return;
@@ -130,7 +133,31 @@ export default function App() {
           throw new Error('Conversion response did not include a model URL.');
         }
 
-        setPublicModelUrl(normalizeModelUrl(data.model_url, response.url));
+        const normalizedModelUrl = normalizeModelUrl(data.model_url, response.url);
+        setPublicModelUrl(normalizedModelUrl);
+
+        const modelResponse = await fetch(normalizedModelUrl, {
+          signal: controller.signal,
+          headers: {
+            'ngrok-skip-browser-warning': 'true',
+          },
+        });
+
+        if (requestId !== uploadRequestRef.current) return;
+
+        if (!modelResponse.ok) {
+          throw new Error(`Model download error: ${modelResponse.status} ${modelResponse.statusText}`);
+        }
+
+        const modelBlob = await modelResponse.blob();
+
+        if (requestId !== uploadRequestRef.current) return;
+
+        if (!modelBlob.type.includes('gltf-binary') && !normalizedModelUrl.toLowerCase().includes('.glb')) {
+          throw new Error('Downloaded model was not a valid GLB file.');
+        }
+
+        setGlbBlob(modelBlob);
         return;
       }
 
@@ -226,16 +253,14 @@ export default function App() {
                     scale={modelScale}
                     onLoad={handleModelLoad}
                     ar
-                    ar-modes="scene-viewer quick-look webxr"
-                    ar-scale="fixed"
+                    ar-modes="webxr scene-viewer"
+                    ar-scale="auto"
                     ar-placement="floor"
                     camera-controls
-                    interaction-prompt="none"
+                    auto-rotate
                     shadow-intensity="1"
                     environment-image="neutral"
                     exposure="0.9"
-                    camera-orbit="0deg 75deg 2.4m"
-                    field-of-view="30deg"
                     style={{ width: '100%', height: '100%' }}
                   >
                     <button slot="ar-button" className="ar-button">
