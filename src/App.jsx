@@ -377,7 +377,6 @@ export default function App() {
                     ar-placement="floor"
                     xr-environment
                     camera-controls
-                    auto-rotate
                     shadow-intensity="1"
                     shadow-softness="0.8"
                     environment-image="neutral"
