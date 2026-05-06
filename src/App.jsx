@@ -2,6 +2,9 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import '@google/model-viewer';
 import './App.css';
 
+const SNAPSHOTS_STORAGE_KEY = 'placia-snapshots';
+const MAX_SNAPSHOTS = 6;
+
 export default function App() {
   const [imageFile, setImageFile] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
@@ -12,6 +15,13 @@ export default function App() {
   const [modelScale, setModelScale] = useState('1 1 1');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
+  const [snapshots, setSnapshots] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(SNAPSHOTS_STORAGE_KEY)) || [];
+    } catch {
+      return [];
+    }
+  });
   const modelRef = useRef(null);
   const previewRef = useRef(null);
   const videoRef = useRef(null);
@@ -24,7 +34,10 @@ export default function App() {
     return URL.createObjectURL(glbBlob);
   }, [glbBlob]);
 
-  const modelUrl = objectModelUrl || publicModelUrl;
+  const modelUrl = publicModelUrl || objectModelUrl;
+  const arModes = publicModelUrl
+    ? 'scene-viewer webxr quick-look'
+    : 'webxr quick-look';
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
@@ -73,6 +86,14 @@ export default function App() {
       abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SNAPSHOTS_STORAGE_KEY, JSON.stringify(snapshots));
+    } catch {
+      // Ignore storage quota errors; snapshots still remain for the current session.
+    }
+  }, [snapshots]);
 
   useEffect(() => {
     if (!videoRef.current || !cameraStream) return;
@@ -280,6 +301,35 @@ export default function App() {
     modelRef.current?.activateAR?.();
   };
 
+  const handleSaveSnapshot = () => {
+    const model = modelRef.current;
+    if (!model) return;
+
+    try {
+      const imageUrl = model.toDataURL('image/png');
+      const createdAt = new Date();
+      const snapshot = {
+        id: `${createdAt.getTime()}`,
+        imageUrl,
+        title: imageFile?.name || 'Placia snapshot',
+        createdAt: createdAt.toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      };
+
+      setSnapshots((currentSnapshots) => [snapshot, ...currentSnapshots].slice(0, MAX_SNAPSHOTS));
+    } catch {
+      setError('Unable to save snapshot. Try rotating the preview and saving again.');
+    }
+  };
+
+  const deleteSnapshot = (snapshotId) => {
+    setSnapshots((currentSnapshots) => currentSnapshots.filter((snapshot) => snapshot.id !== snapshotId));
+  };
+
   const handleModelLoad = () => {
     const model = modelRef.current;
     if (!model) return;
@@ -339,12 +389,14 @@ export default function App() {
                     scale={modelScale}
                     onLoad={handleModelLoad}
                     ar
-                    ar-modes="webxr scene-viewer"
-                    ar-scale="auto"
+                    ar-modes={arModes}
+                    ar-scale="fixed"
                     ar-placement="floor"
+                    xr-environment
                     camera-controls
                     auto-rotate
                     shadow-intensity="1"
+                    shadow-softness="0.8"
                     environment-image="neutral"
                     exposure="0.9"
                     style={{ width: '100%', height: '100%' }}
@@ -366,10 +418,15 @@ export default function App() {
 
               {modelUrl && (
                 <div className="viewer-actions">
-                  <button type="button" className="image-action primary-action" onClick={handleViewAr}>
-                    View in AR
-                  </button>
-                  <p className="ar-placement-note">Move slowly until the floor is detected, then tap once to place.</p>
+                  <div className="viewer-action-row">
+                    <button type="button" className="image-action primary-action" onClick={handleViewAr}>
+                      View in AR
+                    </button>
+                    <button type="button" className="image-action secondary-action" onClick={handleSaveSnapshot}>
+                      Save snapshot
+                    </button>
+                  </div>
+                  <p className="ar-placement-note">Scan the floor slowly, tap once on the detected surface, then walk around the placed model.</p>
                 </div>
               )}
             </section>
@@ -487,6 +544,33 @@ export default function App() {
                 </>
               )}
             </div>
+
+            {snapshots.length > 0 && (
+              <section className="snapshots-panel" aria-label="Saved snapshots">
+                <div className="snapshots-heading">
+                  <span>Saved snapshots</span>
+                  <strong>{snapshots.length}</strong>
+                </div>
+                <div className="snapshots-grid">
+                  {snapshots.map((snapshot) => (
+                    <article className="snapshot-card" key={snapshot.id}>
+                      <img src={snapshot.imageUrl} alt={`Saved snapshot from ${snapshot.createdAt}`} />
+                      <div className="snapshot-meta">
+                        <span>{snapshot.createdAt}</span>
+                        <div className="snapshot-actions">
+                          <a href={snapshot.imageUrl} download={`${snapshot.title}.png`}>
+                            Download
+                          </a>
+                          <button type="button" onClick={() => deleteSnapshot(snapshot.id)}>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
           </section>
         </section>
       </div>

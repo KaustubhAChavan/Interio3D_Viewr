@@ -808,12 +808,105 @@ h1 {
   gap: 8px;
 }
 
+.viewer-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
 .ar-placement-note {
   margin: 0;
   color: #66736f;
   font-size: 12px;
   line-height: 1.3;
   text-align: center;
+}
+
+.snapshots-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.snapshots-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #66736f;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.snapshots-heading strong {
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff8f5;
+  color: #b25a48;
+  font-size: 12px;
+}
+
+.snapshots-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.snapshot-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(20, 32, 29, 0.08);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(20, 32, 29, 0.06);
+}
+
+.snapshot-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #eef8f4;
+}
+
+.snapshot-meta {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
+.snapshot-card span {
+  color: #66736f;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.snapshot-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snapshot-actions a,
+.snapshot-actions button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #247c73;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.snapshot-actions button {
+  color: #b25a48;
 }
 
 @media (max-width: 819px) {
@@ -891,6 +984,10 @@ h1 {
 
   .viewer-actions .image-action {
     min-height: 44px;
+  }
+
+  .viewer-action-row {
+    grid-template-columns: 1fr;
   }
 
   .studio-panel {
@@ -1136,6 +1233,10 @@ h1 {
   .viewer-actions .image-action,
   .image-action {
     min-height: 36px;
+  }
+
+  .snapshots-panel {
+    display: none;
   }
 
   .camera-panel {
