@@ -46,7 +46,7 @@ export default function App() {
   }, [imageFile]);
 
   const hasPreview = previewMode || imageFile || loading || modelUrl;
-  const convertUrl = 'https://excavate-persecute-punctuate.ngrok-free.dev/convert';
+  const convertUrl = 'https://trellis-mock-backend.vercel.app/convert';
   const statusTone = error ? 'error' : loading ? 'loading' : modelUrl ? 'ready' : 'idle';
   const statusText = error ? 'Check model' : loading ? 'Generating' : modelUrl ? 'AR ready' : 'Ready';
 
