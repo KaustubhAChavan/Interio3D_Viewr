@@ -1382,3 +1382,67 @@ h1 {
     gap: 10px;
   }
 }
+
+@media (hover: none) and (pointer: coarse) {
+  .design-app {
+    display: block;
+    padding: 0;
+    background: linear-gradient(180deg, #fff9f6 0%, #f2faf7 100%);
+  }
+
+  .app-shell,
+  .app-shell.has-viewer {
+    width: 100%;
+    max-height: none;
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .app-header {
+    position: sticky;
+    padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
+  }
+
+  .app-workspace,
+  .app-workspace.has-viewer {
+    max-width: none;
+    min-height: auto;
+    height: auto;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    align-content: start;
+    overflow: visible;
+    padding: 8px 8px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .viewer-panel {
+    order: -1;
+    min-height: calc(100dvh - 67px);
+    height: auto;
+    overflow: visible;
+    padding: 8px;
+  }
+
+  .viewer-surface {
+    height: auto;
+    min-height: 380px;
+    aspect-ratio: 9 / 13;
+  }
+
+  .studio-panel {
+    height: auto;
+    min-height: 0;
+    align-content: start;
+    overflow: visible;
+    padding: 10px;
+  }
+
+  .content-stack,
+  .placia-hero,
+  .snapshots-panel,
+  .camera-panel {
+    display: grid;
+  }
+}
