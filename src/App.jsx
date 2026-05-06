@@ -36,9 +36,7 @@ export default function App() {
 
   const modelUrl = publicModelUrl || objectModelUrl;
   const hasNativeRoomAnchor = Boolean(publicModelUrl);
-  const arModes = hasNativeRoomAnchor
-    ? 'scene-viewer quick-look webxr'
-    : 'webxr quick-look';
+  const arModes = 'webxr quick-look scene-viewer';
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
@@ -391,9 +389,8 @@ export default function App() {
                     onLoad={handleModelLoad}
                     ar
                     ar-modes={arModes}
-                    ar-scale="fixed"
+                    ar-scale="auto"
                     ar-placement="floor"
-                    xr-environment
                     camera-controls
                     shadow-intensity="1"
                     shadow-softness="0.8"
@@ -429,7 +426,7 @@ export default function App() {
                   </div>
                   <p className="ar-placement-note">
                     {hasNativeRoomAnchor
-                      ? 'On Android this opens native Scene Viewer. Scan the floor, tap once to anchor the model, then walk around it.'
+                      ? 'Place the model, adjust size with two fingers, then walk around it. One-finger dragging is locked to keep the anchor still.'
                       : 'Browser AR fallback is active. For fixed Android room anchoring, the generated model must come from a public HTTPS URL.'}
                   </p>
                 </div>
