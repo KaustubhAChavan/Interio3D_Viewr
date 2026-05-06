@@ -374,7 +374,6 @@ export default function App() {
                     ar
                     ar-modes={arModes}
                     ar-scale="auto"
-                    ar-placement="floor"
                     xr-environment
                     camera-controls
                     shadow-intensity="1"
