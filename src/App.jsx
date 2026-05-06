@@ -13,7 +13,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const modelScale = '1 1 1';
-  const [arGuideText, setArGuideText] = useState('Tap Place & Lock in AR, scan the floor, then tap once on the surface to anchor the model.');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [snapshots, setSnapshots] = useState(() => {
@@ -37,7 +36,7 @@ export default function App() {
 
   const modelUrl = publicModelUrl || objectModelUrl;
   const arModes = publicModelUrl
-    ? 'webxr scene-viewer quick-look'
+    ? 'scene-viewer webxr quick-look'
     : 'webxr quick-look';
 
   const imagePreviewUrl = useMemo(() => {
@@ -102,37 +101,6 @@ export default function App() {
     videoRef.current.srcObject = cameraStream;
     videoRef.current.play();
   }, [cameraStream]);
-
-  useEffect(() => {
-    const model = modelRef.current;
-    if (!model) return;
-
-    const handleArStatus = (event) => {
-      const status = event.detail?.status;
-
-      if (status === 'session-started') {
-        setArGuideText('Move your phone slowly to scan the floor. Tap once on the detected surface to lock the model.');
-      }
-
-      if (status === 'object-placed') {
-        setArGuideText('Model locked in place. Walk around it to view from all sides.');
-      }
-
-      if (status === 'failed') {
-        setArGuideText('AR could not start. Use a mobile browser with camera/AR permission enabled.');
-      }
-
-      if (status === 'not-presenting') {
-        setArGuideText('Tap Place & Lock in AR, scan the floor, then tap once on the surface to anchor the model.');
-      }
-    };
-
-    model.addEventListener('ar-status', handleArStatus);
-
-    return () => {
-      model.removeEventListener('ar-status', handleArStatus);
-    };
-  }, [modelUrl]);
 
   useEffect(() => {
     return () => {
@@ -328,7 +296,6 @@ export default function App() {
   };
 
   const handleViewAr = () => {
-    setArGuideText('Starting AR. Scan the floor slowly, then tap once where you want to lock the model.');
     modelRef.current?.activateAR?.();
   };
 
@@ -406,7 +373,7 @@ export default function App() {
                     scale={modelScale}
                     ar
                     ar-modes={arModes}
-                    ar-scale="fixed"
+                    ar-scale="auto"
                     ar-placement="floor"
                     xr-environment
                     camera-controls
@@ -414,11 +381,10 @@ export default function App() {
                     shadow-softness="0.8"
                     environment-image="neutral"
                     exposure="0.9"
-                    interaction-prompt="none"
                     style={{ width: '100%', height: '100%' }}
                   >
                     <button slot="ar-button" className="ar-button">
-                      Place & Lock in AR
+                      Place in AR
                     </button>
                   </model-viewer>
                 ) : (
@@ -436,13 +402,13 @@ export default function App() {
                 <div className="viewer-actions">
                   <div className="viewer-action-row">
                     <button type="button" className="image-action primary-action" onClick={handleViewAr}>
-                      Place & Lock in AR
+                      Place in AR
                     </button>
                     <button type="button" className="image-action secondary-action" onClick={handleSaveSnapshot}>
                       Save snapshot
                     </button>
                   </div>
-                  <p className="ar-placement-note">{arGuideText}</p>
+                  <p className="ar-placement-note">Scan the floor, tap once to place the model, adjust size if needed, then walk around it to view from all sides.</p>
                 </div>
               )}
             </section>
