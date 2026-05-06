@@ -12,7 +12,7 @@ export default function App() {
   const [publicModelUrl, setPublicModelUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const modelScale = '1 1 1';
+  const [modelScale, setModelScale] = useState('1 1 1');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [snapshots, setSnapshots] = useState(() => {
@@ -35,8 +35,9 @@ export default function App() {
   }, [glbBlob]);
 
   const modelUrl = publicModelUrl || objectModelUrl;
-  const arModes = publicModelUrl
-    ? 'scene-viewer webxr quick-look'
+  const hasNativeRoomAnchor = Boolean(publicModelUrl);
+  const arModes = hasNativeRoomAnchor
+    ? 'scene-viewer quick-look webxr'
     : 'webxr quick-look';
 
   const imagePreviewUrl = useMemo(() => {
@@ -123,6 +124,7 @@ export default function App() {
     setPublicModelUrl(null);
     setLoading(false);
     setError(null);
+    setModelScale('1 1 1');
     setCameraStream(null);
     setCameraOpen(false);
   };
@@ -142,6 +144,7 @@ export default function App() {
     setLoading(true);
     setGlbBlob(null);
     setPublicModelUrl(null);
+    setModelScale('1 1 1');
 
     try {
       const formData = new FormData();
@@ -328,6 +331,20 @@ export default function App() {
     setSnapshots((currentSnapshots) => currentSnapshots.filter((snapshot) => snapshot.id !== snapshotId));
   };
 
+  const handleModelLoad = () => {
+    const model = modelRef.current;
+    if (!model) return;
+
+    const { x, y, z } = model.getDimensions();
+    const largestDimension = Math.max(x, y, z);
+    const targetSize = 0.8;
+
+    if (largestDimension > 0) {
+      const scaleFactor = targetSize / largestDimension;
+      setModelScale(`${scaleFactor} ${scaleFactor} ${scaleFactor}`);
+    }
+  };
+
   return (
     <main className="design-app">
       <div className={`app-shell ${hasPreview ? 'has-viewer' : ''}`}>
@@ -371,19 +388,22 @@ export default function App() {
                     ref={modelRef}
                     src={modelUrl}
                     scale={modelScale}
+                    onLoad={handleModelLoad}
                     ar
                     ar-modes={arModes}
-                    ar-scale="auto"
+                    ar-scale="fixed"
+                    ar-placement="floor"
                     xr-environment
                     camera-controls
                     shadow-intensity="1"
                     shadow-softness="0.8"
                     environment-image="neutral"
                     exposure="0.9"
+                    interaction-prompt="none"
                     style={{ width: '100%', height: '100%' }}
                   >
                     <button slot="ar-button" className="ar-button">
-                      Place in AR
+                      Place & Lock in Room
                     </button>
                   </model-viewer>
                 ) : (
@@ -401,13 +421,17 @@ export default function App() {
                 <div className="viewer-actions">
                   <div className="viewer-action-row">
                     <button type="button" className="image-action primary-action" onClick={handleViewAr}>
-                      Place in AR
+                      Place & Lock in Room
                     </button>
                     <button type="button" className="image-action secondary-action" onClick={handleSaveSnapshot}>
                       Save snapshot
                     </button>
                   </div>
-                  <p className="ar-placement-note">Scan the floor, tap once to place the model, adjust size if needed, then walk around it to view from all sides.</p>
+                  <p className="ar-placement-note">
+                    {hasNativeRoomAnchor
+                      ? 'On Android this opens native Scene Viewer. Scan the floor, tap once to anchor the model, then walk around it.'
+                      : 'Browser AR fallback is active. For fixed Android room anchoring, the generated model must come from a public HTTPS URL.'}
+                  </p>
                 </div>
               )}
             </section>
