@@ -37,7 +37,7 @@ export default function App() {
 
   const modelUrl = publicModelUrl || objectModelUrl;
   const hasNativeRoomAnchor = Boolean(publicModelUrl?.startsWith('https://'));
-  const arModes = hasNativeRoomAnchor ? 'scene-viewer webxr quick-look' : 'webxr quick-look';
+  const arModes = 'webxr scene-viewer quick-look';
   const arScale = placementLocked ? 'fixed' : 'auto';
 
   const imagePreviewUrl = useMemo(() => {
