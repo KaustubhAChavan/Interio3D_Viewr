@@ -35,17 +35,6 @@ const revokeModelAssets = (model) => {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const encodeSharePayload = (payload) => {
-  const bytes = new TextEncoder().encode(JSON.stringify(payload));
-  let binary = '';
-
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-};
-
 const decodeSharePayload = (encodedPayload) => {
   const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
   const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
@@ -119,30 +108,18 @@ export default function App() {
     ? 'AR ready'
     : 'Ready';
 
-  const shareUrl = useMemo(() => {
-    if (typeof window === 'undefined' || selectedModels.length === 0) return '';
+  const websiteUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
 
-    const shareableModels = selectedModels.filter((model) => model.publicUrl?.startsWith('https://'));
-    if (shareableModels.length !== selectedModels.length) return '';
-
-    const payload = {
-      version: 1,
-      models: shareableModels.map((model) => ({
-        name: model.name,
-        url: model.publicUrl,
-        transform: normalizeModelTransform(model.transform),
-      })),
-    };
     const url = new URL(window.location.href);
     url.search = '';
     url.hash = '';
-    url.searchParams.set('scene', encodeSharePayload(payload));
 
     return url.toString();
-  }, [selectedModels]);
+  }, []);
 
-  const qrImageUrl = shareUrl
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(shareUrl)}`
+  const qrImageUrl = websiteUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(websiteUrl)}`
     : '';
 
   const normalizeModelUrl = (rawModelUrl, responseUrl) => {
@@ -703,11 +680,11 @@ export default function App() {
     });
   };
 
-  const handleCopyShareUrl = async () => {
-    if (!shareUrl) return;
+  const handleCopyWebsiteUrl = async () => {
+    if (!websiteUrl) return;
 
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      await navigator.clipboard.writeText(websiteUrl);
       setCopyStatus('Copied');
     } catch {
       setCopyStatus('Select and copy the link below.');
@@ -738,9 +715,21 @@ export default function App() {
               <p className="eyebrow brand-title">Placia Studio</p>
             </div>
           </div>
-          <div className={`header-status is-${statusTone}`} aria-live="polite">
-            <span />
-            {statusText}
+          <div className="header-actions">
+            <button
+              type="button"
+              className="header-qr-button"
+              onClick={() => {
+                setCopyStatus('');
+                setQrOpen(true);
+              }}
+            >
+              Phone QR
+            </button>
+            <div className={`header-status is-${statusTone}`} aria-live="polite">
+              <span />
+              {statusText}
+            </div>
           </div>
         </header>
 
@@ -842,15 +831,12 @@ export default function App() {
                         setCopyStatus('');
                         setQrOpen(true);
                       }}
-                      disabled={!shareUrl}
                     >
                       Phone QR
                     </button>
                   </div>
                   <p className="ar-placement-note">
-                    {!shareUrl
-                      ? 'Phone QR needs models from public HTTPS backend URLs. Local blob-only scenes can be previewed here but cannot be shared to another device.'
-                      : selectedModelCount > 1
+                    {selectedModelCount > 1
                       ? 'Selected models are combined into one GLB scene before AR opens.'
                       : hasNativeRoomAnchor
                       ? 'Place the model, adjust size with two fingers, then walk around it. One-finger dragging is disabled to avoid accidental movement.'
@@ -1135,38 +1121,23 @@ export default function App() {
           <div className="ar-guide-modal qr-modal">
             <div className="ar-guide-header">
               <span>Phone handoff</span>
-              <strong id="qr-guide-title">Open this scene on phone</strong>
+              <strong id="qr-guide-title">Open Placia on phone</strong>
             </div>
 
-            {shareUrl ? (
-              <>
-                <div className="qr-frame">
-                  <img src={qrImageUrl} alt="QR code for opening this AR scene on a phone" />
-                </div>
-                <textarea className="share-link-field" value={shareUrl} readOnly aria-label="Phone handoff link" />
-                {copyStatus && <p className="qr-status">{copyStatus}</p>}
-                <div className="ar-guide-actions">
-                  <button type="button" className="image-action secondary-action" onClick={() => setQrOpen(false)}>
-                    Close
-                  </button>
-                  <button type="button" className="image-action primary-action" onClick={handleCopyShareUrl}>
-                    Copy link
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="ar-guide-steps">
-                  <span>Phone handoff needs selected models from public HTTPS URLs.</span>
-                  <span>Deploy the backend model files publicly, then upload again and generate the QR.</span>
-                </div>
-                <div className="ar-guide-actions">
-                  <button type="button" className="image-action primary-action" onClick={() => setQrOpen(false)}>
-                    Close
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="qr-frame">
+              <img src={qrImageUrl} alt="QR code for opening this website on a phone" />
+            </div>
+            <textarea className="share-link-field" value={websiteUrl} readOnly aria-label="Phone handoff link" />
+            <p className="qr-helper">Scan this on your phone, then upload or capture the image again there.</p>
+            {copyStatus && <p className="qr-status">{copyStatus}</p>}
+            <div className="ar-guide-actions">
+              <button type="button" className="image-action secondary-action" onClick={() => setQrOpen(false)}>
+                Close
+              </button>
+              <button type="button" className="image-action primary-action" onClick={handleCopyWebsiteUrl}>
+                Copy link
+              </button>
+            </div>
           </div>
         </div>
       )}
