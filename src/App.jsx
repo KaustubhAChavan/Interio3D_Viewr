@@ -35,8 +35,8 @@ export default function App() {
   }, [glbBlob]);
 
   const modelUrl = publicModelUrl || objectModelUrl;
-  const hasNativeRoomAnchor = Boolean(publicModelUrl);
-  const arModes = 'webxr quick-look scene-viewer';
+  const hasNativeRoomAnchor = Boolean(publicModelUrl?.startsWith('https://'));
+  const arModes = hasNativeRoomAnchor ? 'scene-viewer webxr quick-look' : 'webxr quick-look';
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
@@ -44,7 +44,7 @@ export default function App() {
   }, [imageFile]);
 
   const hasPreview = previewMode || imageFile || loading || modelUrl;
-  const convertUrl = 'https://trellis-mock-backend.vercel.app/convert';
+  const convertUrl = import.meta.env.VITE_CONVERT_URL || 'https://trellis-mock-backend.vercel.app/convert';
   const statusTone = error ? 'error' : loading ? 'loading' : modelUrl ? 'ready' : 'idle';
   const statusText = error ? 'Check model' : loading ? 'Generating' : modelUrl ? 'AR ready' : 'Ready';
 
