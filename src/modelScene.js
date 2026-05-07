@@ -4,6 +4,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export const MODEL_TARGET_SIZE = 0.8;
 const SCENE_MODEL_GAP = 0.35;
+export const DEFAULT_MODEL_TRANSFORM = {
+  offsetX: 0,
+  offsetZ: 0,
+  rotationY: 0,
+  scale: 1,
+};
 
 const loader = new GLTFLoader();
 const exporter = new GLTFExporter();
@@ -65,6 +71,24 @@ export const formatSignedMetric = (value, suffix = 'u') => {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}${suffix}`;
 };
 
+export const normalizeModelTransform = (transform = {}) => ({
+  offsetX: Number.isFinite(transform.offsetX) ? transform.offsetX : DEFAULT_MODEL_TRANSFORM.offsetX,
+  offsetZ: Number.isFinite(transform.offsetZ) ? transform.offsetZ : DEFAULT_MODEL_TRANSFORM.offsetZ,
+  rotationY: Number.isFinite(transform.rotationY) ? transform.rotationY : DEFAULT_MODEL_TRANSFORM.rotationY,
+  scale: Number.isFinite(transform.scale) ? transform.scale : DEFAULT_MODEL_TRANSFORM.scale,
+});
+
+export const hasCustomModelTransform = (model) => {
+  const transform = normalizeModelTransform(model?.transform);
+
+  return (
+    Math.abs(transform.offsetX - DEFAULT_MODEL_TRANSFORM.offsetX) > 0.001 ||
+    Math.abs(transform.offsetZ - DEFAULT_MODEL_TRANSFORM.offsetZ) > 0.001 ||
+    Math.abs(transform.rotationY - DEFAULT_MODEL_TRANSFORM.rotationY) > 0.001 ||
+    Math.abs(transform.scale - DEFAULT_MODEL_TRANSFORM.scale) > 0.001
+  );
+};
+
 export const combineModelsIntoGlb = async (models) => {
   if (!models.length) {
     throw new Error('Select at least one model to build an AR scene.');
@@ -78,8 +102,10 @@ export const combineModelsIntoGlb = async (models) => {
       const gltf = await loader.loadAsync(model.assetUrl);
       const scene = gltf.scene;
       const metadata = model.metadata || getBoxMetadata(scene);
+      const transform = normalizeModelTransform(model.transform);
       const scaleFactor = metadata.scaleFactor || 1;
       const rawWidth = metadata.dimensions?.x || MODEL_TARGET_SIZE;
+      const finalScale = scaleFactor * transform.scale;
 
       scene.position.x -= metadata.center?.x || 0;
       scene.position.y -= metadata.minY || 0;
@@ -87,12 +113,14 @@ export const combineModelsIntoGlb = async (models) => {
 
       const wrapper = new Group();
       wrapper.name = `Placia_Model_${index + 1}`;
-      wrapper.scale.setScalar(scaleFactor);
+      wrapper.scale.setScalar(finalScale);
+      wrapper.rotation.y = (transform.rotationY * Math.PI) / 180;
       wrapper.add(scene);
 
       return {
         wrapper,
-        width: Math.max(rawWidth * scaleFactor, 0.25),
+        transform,
+        width: Math.max(rawWidth * finalScale, 0.25),
       };
     }),
   );
@@ -102,8 +130,9 @@ export const combineModelsIntoGlb = async (models) => {
     SCENE_MODEL_GAP * Math.max(preparedModels.length - 1, 0);
   let cursor = -totalWidth / 2;
 
-  preparedModels.forEach(({ wrapper, width }) => {
-    wrapper.position.x = cursor + width / 2;
+  preparedModels.forEach(({ wrapper, width, transform }) => {
+    wrapper.position.x = cursor + width / 2 + transform.offsetX;
+    wrapper.position.z = transform.offsetZ;
     root.add(wrapper);
     cursor += width + SCENE_MODEL_GAP;
   });

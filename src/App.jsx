@@ -4,15 +4,23 @@ import './App.css';
 import {
   combineModelsIntoGlb,
   createModelScale,
+  DEFAULT_MODEL_TRANSFORM,
   formatMetric,
   formatScale,
   formatSignedMetric,
+  hasCustomModelTransform,
   inspectModel,
+  normalizeModelTransform,
 } from './modelScene';
 
 const SNAPSHOTS_STORAGE_KEY = 'placia-snapshots';
 const MAX_SNAPSHOTS = 6;
 const MAX_SCENE_MODELS = 6;
+const POSITION_STEP = 0.15;
+const ROTATION_STEP = 15;
+const SCALE_STEP = 0.1;
+const MIN_COMPOSER_SCALE = 0.4;
+const MAX_COMPOSER_SCALE = 2.5;
 
 const revokeObjectUrl = (url) => {
   if (url?.startsWith('blob:')) {
@@ -25,6 +33,28 @@ const revokeModelAssets = (model) => {
   revokeObjectUrl(model.imageUrl);
 };
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const encodeSharePayload = (payload) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = '';
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+};
+
+const decodeSharePayload = (encodedPayload) => {
+  const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+
+  return JSON.parse(new TextDecoder().decode(bytes));
+};
+
 export default function App() {
   const [imageFile, setImageFile] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
@@ -34,6 +64,9 @@ export default function App() {
   const [sceneTitle, setSceneTitle] = useState('');
   const [sceneBuilding, setSceneBuilding] = useState(false);
   const [arGuideOpen, setArGuideOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  const [sharedSceneLoaded, setSharedSceneLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -63,10 +96,14 @@ export default function App() {
   const selectedModels = useMemo(() => models.filter((model) => model.selected), [models]);
   const selectedModelCount = selectedModels.length;
   const singleSelectedModel = selectedModelCount === 1 ? selectedModels[0] : null;
-  const modelScale = singleSelectedModel ? createModelScale(singleSelectedModel.metadata) : '1 1 1';
+  const selectedSceneHasTransforms = selectedModels.some(hasCustomModelTransform);
+  const modelScale =
+    singleSelectedModel && !selectedSceneHasTransforms ? createModelScale(singleSelectedModel.metadata) : '1 1 1';
   const modelUrl = sceneModelUrl;
   const hasNativeRoomAnchor = Boolean(
-    singleSelectedModel?.publicUrl?.startsWith('https://') && modelUrl === singleSelectedModel.publicUrl,
+    singleSelectedModel?.publicUrl?.startsWith('https://') &&
+      modelUrl === singleSelectedModel.publicUrl &&
+      !selectedSceneHasTransforms,
   );
   const arModes = hasNativeRoomAnchor ? 'scene-viewer webxr quick-look' : 'webxr quick-look';
   const hasPreview = previewMode || imageFile || loading || sceneBuilding || modelUrl || models.length > 0;
@@ -81,6 +118,32 @@ export default function App() {
     : modelUrl
     ? 'AR ready'
     : 'Ready';
+
+  const shareUrl = useMemo(() => {
+    if (typeof window === 'undefined' || selectedModels.length === 0) return '';
+
+    const shareableModels = selectedModels.filter((model) => model.publicUrl?.startsWith('https://'));
+    if (shareableModels.length !== selectedModels.length) return '';
+
+    const payload = {
+      version: 1,
+      models: shareableModels.map((model) => ({
+        name: model.name,
+        url: model.publicUrl,
+        transform: normalizeModelTransform(model.transform),
+      })),
+    };
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('scene', encodeSharePayload(payload));
+
+    return url.toString();
+  }, [selectedModels]);
+
+  const qrImageUrl = shareUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(shareUrl)}`
+    : '';
 
   const normalizeModelUrl = (rawModelUrl, responseUrl) => {
     const resolvedUrl = new URL(rawModelUrl, responseUrl);
@@ -169,6 +232,90 @@ export default function App() {
   }, [cameraStream]);
 
   useEffect(() => {
+    if (sharedSceneLoaded || typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const sceneParam = params.get('scene');
+    const singleModelUrl = params.get('modelUrl') || params.get('sceneUrl');
+
+    if (!sceneParam && !singleModelUrl) {
+      setSharedSceneLoaded(true);
+      return;
+    }
+
+    let canceled = false;
+
+    const loadSharedScene = async () => {
+      setSharedSceneLoaded(true);
+      setPreviewMode(true);
+      setLoading(true);
+      setError(null);
+      clearScene();
+      modelsRef.current.forEach(revokeModelAssets);
+      modelsRef.current = [];
+      setModels([]);
+
+      try {
+        const payload = sceneParam
+          ? decodeSharePayload(sceneParam)
+          : {
+              version: 1,
+              models: [{ name: 'Shared model', url: singleModelUrl, transform: DEFAULT_MODEL_TRANSFORM }],
+            };
+
+        if (!Array.isArray(payload.models) || payload.models.length === 0) {
+          throw new Error('Shared scene did not include any models.');
+        }
+
+        const createdAt = new Date();
+        const loadedModels = await Promise.all(
+          payload.models.slice(0, MAX_SCENE_MODELS).map(async (sharedModel, index) => {
+            if (!sharedModel.url?.startsWith('https://')) {
+              throw new Error('Shared scenes must use public HTTPS model URLs.');
+            }
+
+            const metadata = await inspectModel(sharedModel.url);
+
+            return {
+              id: `shared-${createdAt.getTime()}-${index}`,
+              name: sharedModel.name || `Shared model ${index + 1}`,
+              assetUrl: sharedModel.url,
+              imageUrl: null,
+              publicUrl: sharedModel.url,
+              metadata,
+              transform: normalizeModelTransform(sharedModel.transform),
+              selected: true,
+              createdAt: createdAt.toLocaleString([], {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            };
+          }),
+        );
+
+        if (canceled) return;
+        setModels(loadedModels);
+      } catch (err) {
+        if (!canceled) {
+          setError(err.message || 'Unable to load the shared AR scene.');
+        }
+      } finally {
+        if (!canceled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadSharedScene();
+
+    return () => {
+      canceled = true;
+    };
+  }, [clearScene, sharedSceneLoaded]);
+
+  useEffect(() => {
     if (loading) return;
 
     if (selectedModels.length === 0) {
@@ -176,7 +323,7 @@ export default function App() {
       return;
     }
 
-    if (selectedModels.length === 1) {
+    if (selectedModels.length === 1 && !selectedSceneHasTransforms) {
       const model = selectedModels[0];
       const url = model.publicUrl?.startsWith('https://') ? model.publicUrl : model.assetUrl;
       replaceScene({
@@ -220,7 +367,7 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, [clearScene, loading, replaceScene, selectedModels]);
+  }, [clearScene, loading, replaceScene, selectedModels, selectedSceneHasTransforms]);
 
   const resetToHome = () => {
     uploadRequestRef.current += 1;
@@ -242,6 +389,8 @@ export default function App() {
     setCameraStream(null);
     setCameraOpen(false);
     setArGuideOpen(false);
+    setQrOpen(false);
+    setCopyStatus('');
   };
 
   const addModelToScene = (model) => {
@@ -279,6 +428,7 @@ export default function App() {
         imageUrl,
         publicUrl,
         metadata,
+        transform: DEFAULT_MODEL_TRANSFORM,
         selected: true,
         createdAt: createdAt.toLocaleString([], {
           month: 'short',
@@ -515,12 +665,53 @@ export default function App() {
     );
   };
 
+  const updateModelTransform = (modelId, updater) => {
+    setModels((currentModels) =>
+      currentModels.map((model) => {
+        if (model.id !== modelId) return model;
+
+        const currentTransform = normalizeModelTransform(model.transform);
+        const nextTransform = normalizeModelTransform(updater(currentTransform));
+
+        return {
+          ...model,
+          transform: {
+            ...nextTransform,
+            scale: clamp(nextTransform.scale, MIN_COMPOSER_SCALE, MAX_COMPOSER_SCALE),
+          },
+        };
+      }),
+    );
+  };
+
+  const nudgeModelTransform = (modelId, key, delta) => {
+    updateModelTransform(modelId, (transform) => ({
+      ...transform,
+      [key]: transform[key] + delta,
+    }));
+  };
+
+  const resetModelTransform = (modelId) => {
+    updateModelTransform(modelId, () => DEFAULT_MODEL_TRANSFORM);
+  };
+
   const removeModel = (modelId) => {
     setModels((currentModels) => {
       const modelToRemove = currentModels.find((model) => model.id === modelId);
       if (modelToRemove) revokeModelAssets(modelToRemove);
       return currentModels.filter((model) => model.id !== modelId);
     });
+  };
+
+  const handleCopyShareUrl = async () => {
+    if (!shareUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopyStatus('Copied');
+    } catch {
+      setCopyStatus('Select and copy the link below.');
+    }
   };
 
   const downloadScene = () => {
@@ -644,9 +835,22 @@ export default function App() {
                     <button type="button" className="image-action secondary-action" onClick={downloadScene}>
                       Download GLB
                     </button>
+                    <button
+                      type="button"
+                      className="image-action secondary-action"
+                      onClick={() => {
+                        setCopyStatus('');
+                        setQrOpen(true);
+                      }}
+                      disabled={!shareUrl}
+                    >
+                      Phone QR
+                    </button>
                   </div>
                   <p className="ar-placement-note">
-                    {selectedModelCount > 1
+                    {!shareUrl
+                      ? 'Phone QR needs models from public HTTPS backend URLs. Local blob-only scenes can be previewed here but cannot be shared to another device.'
+                      : selectedModelCount > 1
                       ? 'Selected models are combined into one GLB scene before AR opens.'
                       : hasNativeRoomAnchor
                       ? 'Place the model, adjust size with two fingers, then walk around it. One-finger dragging is disabled to avoid accidental movement.'
@@ -754,37 +958,87 @@ export default function App() {
                 </div>
 
                 <div className="model-list">
-                  {models.map((model, index) => (
-                    <article className={`model-card ${model.selected ? 'is-selected' : ''}`} key={model.id}>
-                      <label className="model-select-row">
-                        <input
-                          type="checkbox"
-                          checked={model.selected}
-                          onChange={() => toggleModelSelection(model.id)}
-                        />
-                        <img src={model.imageUrl} alt={`Source for ${model.name}`} />
-                        <span>
-                          <small>Model {index + 1}</small>
-                          <strong>{model.name}</strong>
-                        </span>
-                      </label>
+                  {models.map((model, index) => {
+                    const transform = normalizeModelTransform(model.transform);
 
-                      <div className="metadata-grid" aria-label={`${model.name} metadata`}>
-                        <span>W {formatMetric(model.metadata.normalizedDimensions.x)}</span>
-                        <span>H {formatMetric(model.metadata.normalizedDimensions.y)}</span>
-                        <span>D {formatMetric(model.metadata.normalizedDimensions.z)}</span>
-                        <span>Scale {formatScale(model.metadata.scaleFactor)}</span>
-                        <span>Floor {formatSignedMetric(model.metadata.floorOffset)}</span>
-                      </div>
+                    return (
+                      <article className={`model-card ${model.selected ? 'is-selected' : ''}`} key={model.id}>
+                        <label className="model-select-row">
+                          <input
+                            type="checkbox"
+                            checked={model.selected}
+                            onChange={() => toggleModelSelection(model.id)}
+                          />
+                          {model.imageUrl ? (
+                            <img src={model.imageUrl} alt={`Source for ${model.name}`} />
+                          ) : (
+                            <span className="model-thumb-placeholder">3D</span>
+                          )}
+                          <span>
+                            <small>Model {index + 1}</small>
+                            <strong>{model.name}</strong>
+                          </span>
+                        </label>
 
-                      <div className="model-card-footer">
-                        <span>{model.createdAt}</span>
-                        <button type="button" onClick={() => removeModel(model.id)}>
-                          Remove
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                        <div className="metadata-grid" aria-label={`${model.name} metadata`}>
+                          <span>W {formatMetric(model.metadata.normalizedDimensions.x)}</span>
+                          <span>H {formatMetric(model.metadata.normalizedDimensions.y)}</span>
+                          <span>D {formatMetric(model.metadata.normalizedDimensions.z)}</span>
+                          <span>Base {formatScale(model.metadata.scaleFactor)}</span>
+                          <span>Floor {formatSignedMetric(model.metadata.floorOffset)}</span>
+                        </div>
+
+                        <div className="composer-controls" aria-label={`${model.name} scene composer controls`}>
+                          <div className="composer-row">
+                            <span>X {formatSignedMetric(transform.offsetX)}</span>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'offsetX', -POSITION_STEP)}>
+                              Left
+                            </button>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'offsetX', POSITION_STEP)}>
+                              Right
+                            </button>
+                          </div>
+                          <div className="composer-row">
+                            <span>Z {formatSignedMetric(transform.offsetZ)}</span>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'offsetZ', -POSITION_STEP)}>
+                              Back
+                            </button>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'offsetZ', POSITION_STEP)}>
+                              Front
+                            </button>
+                          </div>
+                          <div className="composer-row">
+                            <span>Rot {Math.round(transform.rotationY)} deg</span>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'rotationY', -ROTATION_STEP)}>
+                              -15
+                            </button>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'rotationY', ROTATION_STEP)}>
+                              +15
+                            </button>
+                          </div>
+                          <div className="composer-row">
+                            <span>Size {formatScale(transform.scale)}</span>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'scale', -SCALE_STEP)}>
+                              Small
+                            </button>
+                            <button type="button" onClick={() => nudgeModelTransform(model.id, 'scale', SCALE_STEP)}>
+                              Big
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="model-card-footer">
+                          <span>{model.createdAt}</span>
+                          <button type="button" onClick={() => resetModelTransform(model.id)}>
+                            Reset
+                          </button>
+                          <button type="button" onClick={() => removeModel(model.id)}>
+                            Remove
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -872,6 +1126,47 @@ export default function App() {
                 Start AR
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {qrOpen && (
+        <div className="ar-guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="qr-guide-title">
+          <div className="ar-guide-modal qr-modal">
+            <div className="ar-guide-header">
+              <span>Phone handoff</span>
+              <strong id="qr-guide-title">Open this scene on phone</strong>
+            </div>
+
+            {shareUrl ? (
+              <>
+                <div className="qr-frame">
+                  <img src={qrImageUrl} alt="QR code for opening this AR scene on a phone" />
+                </div>
+                <textarea className="share-link-field" value={shareUrl} readOnly aria-label="Phone handoff link" />
+                {copyStatus && <p className="qr-status">{copyStatus}</p>}
+                <div className="ar-guide-actions">
+                  <button type="button" className="image-action secondary-action" onClick={() => setQrOpen(false)}>
+                    Close
+                  </button>
+                  <button type="button" className="image-action primary-action" onClick={handleCopyShareUrl}>
+                    Copy link
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="ar-guide-steps">
+                  <span>Phone handoff needs selected models from public HTTPS URLs.</span>
+                  <span>Deploy the backend model files publicly, then upload again and generate the QR.</span>
+                </div>
+                <div className="ar-guide-actions">
+                  <button type="button" className="image-action primary-action" onClick={() => setQrOpen(false)}>
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
