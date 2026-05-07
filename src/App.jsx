@@ -1,18 +1,41 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@google/model-viewer';
 import './App.css';
+import {
+  combineModelsIntoGlb,
+  createModelScale,
+  formatMetric,
+  formatScale,
+  formatSignedMetric,
+  inspectModel,
+} from './modelScene';
 
 const SNAPSHOTS_STORAGE_KEY = 'placia-snapshots';
 const MAX_SNAPSHOTS = 6;
+const MAX_SCENE_MODELS = 6;
+
+const revokeObjectUrl = (url) => {
+  if (url?.startsWith('blob:')) {
+    URL.revokeObjectURL(url);
+  }
+};
+
+const revokeModelAssets = (model) => {
+  revokeObjectUrl(model.assetUrl);
+  revokeObjectUrl(model.imageUrl);
+};
 
 export default function App() {
   const [imageFile, setImageFile] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
-  const [glbBlob, setGlbBlob] = useState(null);
-  const [publicModelUrl, setPublicModelUrl] = useState(null);
+  const [models, setModels] = useState([]);
+  const [sceneModelUrl, setSceneModelUrl] = useState(null);
+  const [sceneBlob, setSceneBlob] = useState(null);
+  const [sceneTitle, setSceneTitle] = useState('');
+  const [sceneBuilding, setSceneBuilding] = useState(false);
+  const [arGuideOpen, setArGuideOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [modelScale, setModelScale] = useState('1 1 1');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [snapshots, setSnapshots] = useState(() => {
@@ -28,25 +51,36 @@ export default function App() {
   const canvasRef = useRef(null);
   const uploadRequestRef = useRef(0);
   const abortRef = useRef(null);
-
-  const objectModelUrl = useMemo(() => {
-    if (!glbBlob) return null;
-    return URL.createObjectURL(glbBlob);
-  }, [glbBlob]);
-
-  const modelUrl = publicModelUrl || objectModelUrl;
-  const hasNativeRoomAnchor = Boolean(publicModelUrl?.startsWith('https://'));
-  const arModes = hasNativeRoomAnchor ? 'scene-viewer webxr quick-look' : 'webxr quick-look';
+  const sceneUrlRef = useRef(null);
+  const sceneBuildRequestRef = useRef(0);
+  const modelsRef = useRef([]);
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
     return URL.createObjectURL(imageFile);
   }, [imageFile]);
 
-  const hasPreview = previewMode || imageFile || loading || modelUrl;
+  const selectedModels = useMemo(() => models.filter((model) => model.selected), [models]);
+  const selectedModelCount = selectedModels.length;
+  const singleSelectedModel = selectedModelCount === 1 ? selectedModels[0] : null;
+  const modelScale = singleSelectedModel ? createModelScale(singleSelectedModel.metadata) : '1 1 1';
+  const modelUrl = sceneModelUrl;
+  const hasNativeRoomAnchor = Boolean(
+    singleSelectedModel?.publicUrl?.startsWith('https://') && modelUrl === singleSelectedModel.publicUrl,
+  );
+  const arModes = hasNativeRoomAnchor ? 'scene-viewer webxr quick-look' : 'webxr quick-look';
+  const hasPreview = previewMode || imageFile || loading || sceneBuilding || modelUrl || models.length > 0;
   const convertUrl = import.meta.env.VITE_CONVERT_URL || 'https://trellis-mock-backend.vercel.app/convert';
-  const statusTone = error ? 'error' : loading ? 'loading' : modelUrl ? 'ready' : 'idle';
-  const statusText = error ? 'Check model' : loading ? 'Generating' : modelUrl ? 'AR ready' : 'Ready';
+  const statusTone = error ? 'error' : loading || sceneBuilding ? 'loading' : modelUrl ? 'ready' : 'idle';
+  const statusText = error
+    ? 'Check model'
+    : loading
+    ? 'Generating'
+    : sceneBuilding
+    ? 'Combining'
+    : modelUrl
+    ? 'AR ready'
+    : 'Ready';
 
   const normalizeModelUrl = (rawModelUrl, responseUrl) => {
     const resolvedUrl = new URL(rawModelUrl, responseUrl);
@@ -63,11 +97,32 @@ export default function App() {
     return resolvedUrl.href;
   };
 
+  const replaceScene = useCallback(({ url, blob = null, title = '', ownsUrl = false }) => {
+    if (sceneUrlRef.current && sceneUrlRef.current !== url) {
+      URL.revokeObjectURL(sceneUrlRef.current);
+    }
+
+    sceneUrlRef.current = ownsUrl ? url : null;
+    setSceneModelUrl(url);
+    setSceneBlob(blob);
+    setSceneTitle(title);
+  }, []);
+
+  const clearScene = useCallback(() => {
+    if (sceneUrlRef.current) {
+      URL.revokeObjectURL(sceneUrlRef.current);
+      sceneUrlRef.current = null;
+    }
+
+    setSceneModelUrl(null);
+    setSceneBlob(null);
+    setSceneTitle('');
+    setSceneBuilding(false);
+  }, []);
+
   useEffect(() => {
-    return () => {
-      if (objectModelUrl) URL.revokeObjectURL(objectModelUrl);
-    };
-  }, [objectModelUrl]);
+    modelsRef.current = models;
+  }, [models]);
 
   useEffect(() => {
     return () => {
@@ -83,6 +138,10 @@ export default function App() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      if (sceneUrlRef.current) {
+        URL.revokeObjectURL(sceneUrlRef.current);
+      }
+      modelsRef.current.forEach(revokeModelAssets);
     };
   }, []);
 
@@ -109,22 +168,130 @@ export default function App() {
     };
   }, [cameraStream]);
 
+  useEffect(() => {
+    if (loading) return;
+
+    if (selectedModels.length === 0) {
+      clearScene();
+      return;
+    }
+
+    if (selectedModels.length === 1) {
+      const model = selectedModels[0];
+      const url = model.publicUrl?.startsWith('https://') ? model.publicUrl : model.assetUrl;
+      replaceScene({
+        url,
+        title: model.name,
+        ownsUrl: false,
+      });
+      setSceneBuilding(false);
+      return;
+    }
+
+    const requestId = sceneBuildRequestRef.current + 1;
+    sceneBuildRequestRef.current = requestId;
+    let canceled = false;
+
+    setSceneBuilding(true);
+    setError(null);
+
+    combineModelsIntoGlb(selectedModels)
+      .then((combinedBlob) => {
+        if (canceled || requestId !== sceneBuildRequestRef.current) return;
+
+        const url = URL.createObjectURL(combinedBlob);
+        replaceScene({
+          url,
+          blob: combinedBlob,
+          title: `${selectedModels.length} model AR scene`,
+          ownsUrl: true,
+        });
+      })
+      .catch((err) => {
+        if (canceled || requestId !== sceneBuildRequestRef.current) return;
+        setError(err.message || 'Unable to combine selected models.');
+      })
+      .finally(() => {
+        if (!canceled && requestId === sceneBuildRequestRef.current) {
+          setSceneBuilding(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [clearScene, loading, replaceScene, selectedModels]);
+
   const resetToHome = () => {
     uploadRequestRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
+
     if (cameraStream) {
       cameraStream.getTracks().forEach((track) => track.stop());
     }
+
+    clearScene();
+    modelsRef.current.forEach(revokeModelAssets);
+    modelsRef.current = [];
+    setModels([]);
     setImageFile(null);
     setPreviewMode(false);
-    setGlbBlob(null);
-    setPublicModelUrl(null);
     setLoading(false);
     setError(null);
-    setModelScale('1 1 1');
     setCameraStream(null);
     setCameraOpen(false);
+    setArGuideOpen(false);
+  };
+
+  const addModelToScene = (model) => {
+    setModels((currentModels) => {
+      const nextModels = [...currentModels, model];
+      const extraCount = Math.max(nextModels.length - MAX_SCENE_MODELS, 0);
+
+      if (extraCount > 0) {
+        nextModels.splice(0, extraCount).forEach(revokeModelAssets);
+      }
+
+      return nextModels;
+    });
+  };
+
+  const processModelBlob = async ({ modelBlob, publicUrl, file, requestId }) => {
+    const assetUrl = URL.createObjectURL(modelBlob);
+    const imageUrl = URL.createObjectURL(file);
+
+    try {
+      const metadata = await inspectModel(assetUrl);
+
+      if (requestId !== uploadRequestRef.current) {
+        revokeObjectUrl(assetUrl);
+        revokeObjectUrl(imageUrl);
+        return;
+      }
+
+      const createdAt = new Date();
+
+      addModelToScene({
+        id: `${createdAt.getTime()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: file.name || `Model ${modelsRef.current.length + 1}`,
+        assetUrl,
+        imageUrl,
+        publicUrl,
+        metadata,
+        selected: true,
+        createdAt: createdAt.toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      });
+    } catch (err) {
+      revokeObjectUrl(assetUrl);
+      revokeObjectUrl(imageUrl);
+      throw err;
+    }
   };
 
   const processImageFile = async (file) => {
@@ -140,9 +307,6 @@ export default function App() {
     setPreviewMode(true);
     setError(null);
     setLoading(true);
-    setGlbBlob(null);
-    setPublicModelUrl(null);
-    setModelScale('1 1 1');
 
     try {
       const formData = new FormData();
@@ -179,8 +343,6 @@ export default function App() {
         }
 
         const normalizedModelUrl = normalizeModelUrl(data.model_url, response.url);
-        setPublicModelUrl(normalizedModelUrl);
-
         const modelResponse = await fetch(normalizedModelUrl, {
           signal: controller.signal,
           headers: {
@@ -202,7 +364,12 @@ export default function App() {
           throw new Error('Downloaded model was not a valid GLB file.');
         }
 
-        setGlbBlob(modelBlob);
+        await processModelBlob({
+          modelBlob,
+          publicUrl: normalizedModelUrl,
+          file,
+          requestId,
+        });
         return;
       }
 
@@ -215,7 +382,12 @@ export default function App() {
         throw new Error(JSON.parse(errorData).error || 'Unknown error');
       }
 
-      setGlbBlob(blob);
+      await processModelBlob({
+        modelBlob: blob,
+        publicUrl: null,
+        file,
+        requestId,
+      });
     } catch (err) {
       if (err.name === 'AbortError' || requestId !== uploadRequestRef.current) return;
       setError(err.message);
@@ -297,7 +469,15 @@ export default function App() {
   };
 
   const handleViewAr = () => {
-    modelRef.current?.activateAR?.();
+    if (!modelUrl || sceneBuilding) return;
+    setArGuideOpen(true);
+  };
+
+  const handleStartAr = () => {
+    setArGuideOpen(false);
+    window.requestAnimationFrame(() => {
+      modelRef.current?.activateAR?.();
+    });
   };
 
   const handleSaveSnapshot = () => {
@@ -310,7 +490,7 @@ export default function App() {
       const snapshot = {
         id: `${createdAt.getTime()}`,
         imageUrl,
-        title: imageFile?.name || 'Placia snapshot',
+        title: sceneTitle || imageFile?.name || 'Placia snapshot',
         createdAt: createdAt.toLocaleString([], {
           month: 'short',
           day: 'numeric',
@@ -329,17 +509,31 @@ export default function App() {
     setSnapshots((currentSnapshots) => currentSnapshots.filter((snapshot) => snapshot.id !== snapshotId));
   };
 
-  const handleModelLoad = () => {
-    const model = modelRef.current;
-    if (!model) return;
+  const toggleModelSelection = (modelId) => {
+    setModels((currentModels) =>
+      currentModels.map((model) => (model.id === modelId ? { ...model, selected: !model.selected } : model)),
+    );
+  };
 
-    const { x, y, z } = model.getDimensions();
-    const largestDimension = Math.max(x, y, z);
-    const targetSize = 0.8;
+  const removeModel = (modelId) => {
+    setModels((currentModels) => {
+      const modelToRemove = currentModels.find((model) => model.id === modelId);
+      if (modelToRemove) revokeModelAssets(modelToRemove);
+      return currentModels.filter((model) => model.id !== modelId);
+    });
+  };
 
-    if (largestDimension > 0) {
-      const scaleFactor = targetSize / largestDimension;
-      setModelScale(`${scaleFactor} ${scaleFactor} ${scaleFactor}`);
+  const downloadScene = () => {
+    const downloadUrl = sceneBlob ? URL.createObjectURL(sceneBlob) : modelUrl;
+    if (!downloadUrl) return;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${sceneTitle || 'placia-scene'}.glb`;
+    link.click();
+
+    if (sceneBlob) {
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
     }
   };
 
@@ -364,8 +558,24 @@ export default function App() {
             <section className="viewer-panel" aria-label="3D model preview" ref={previewRef}>
               <div className="viewer-toolbar">
                 <div>
-                  <span>{loading ? 'Generating preview' : modelUrl ? '3D preview' : 'Image selected'}</span>
-                  <strong>{loading ? 'Creating your model' : modelUrl ? 'Model ready' : 'Preparing conversion'}</strong>
+                  <span>
+                    {loading
+                      ? 'Generating preview'
+                      : sceneBuilding
+                      ? 'Combining scene'
+                      : modelUrl
+                      ? `${selectedModelCount} selected`
+                      : 'Image selected'}
+                  </span>
+                  <strong>
+                    {loading
+                      ? 'Creating your model'
+                      : sceneBuilding
+                      ? 'Building AR scene'
+                      : modelUrl
+                      ? sceneTitle
+                      : 'Preparing conversion'}
+                  </strong>
                 </div>
                 <div className="viewer-toolbar-actions">
                   <button type="button" className="toolbar-home-button" onClick={resetToHome} aria-label="Return to home">
@@ -375,18 +585,18 @@ export default function App() {
               </div>
 
               <div className="viewer-surface">
-                {loading ? (
+                {loading || sceneBuilding ? (
                   <div className="loading-state">
-                    {imagePreviewUrl && <img src={imagePreviewUrl} alt="Uploaded preview" />}
+                    {imagePreviewUrl && loading && <img src={imagePreviewUrl} alt="Uploaded preview" />}
                     <div className="spinner" />
-                    <p>Building your 3D preview...</p>
+                    <p>{loading ? 'Building your 3D preview...' : 'Combining selected models into one GLB scene...'}</p>
                   </div>
                 ) : modelUrl ? (
                   <model-viewer
+                    key={modelUrl}
                     ref={modelRef}
                     src={modelUrl}
                     scale={modelScale}
-                    onLoad={handleModelLoad}
                     ar
                     ar-modes={arModes}
                     ar-scale="auto"
@@ -399,7 +609,15 @@ export default function App() {
                     interaction-prompt="none"
                     style={{ width: '100%', height: '100%' }}
                   >
-                    <button slot="ar-button" className="ar-button">
+                    <button
+                      slot="ar-button"
+                      className="ar-button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleViewAr();
+                      }}
+                    >
                       View in AR
                     </button>
                   </model-viewer>
@@ -423,9 +641,14 @@ export default function App() {
                     <button type="button" className="image-action secondary-action" onClick={handleSaveSnapshot}>
                       Save snapshot
                     </button>
+                    <button type="button" className="image-action secondary-action" onClick={downloadScene}>
+                      Download GLB
+                    </button>
                   </div>
                   <p className="ar-placement-note">
-                    {hasNativeRoomAnchor
+                    {selectedModelCount > 1
+                      ? 'Selected models are combined into one GLB scene before AR opens.'
+                      : hasNativeRoomAnchor
                       ? 'Place the model, adjust size with two fingers, then walk around it. One-finger dragging is disabled to avoid accidental movement.'
                       : 'Browser AR fallback is active. For fixed Android room anchoring, the generated model must come from a public HTTPS URL.'}
                   </p>
@@ -458,66 +681,112 @@ export default function App() {
 
             {!loading && (
               <div className="upload-zone">
-              <div className={`upload-card ${loading ? 'is-disabled' : ''}`}>
-                <div className="upload-copy">
-                  <strong>{imageFile ? 'Replace design image' : 'Upload your design image'}</strong>
-                  <small>
-                    {loading
-                      ? 'Keep this screen open while Placia prepares your AR-ready model.'
-                      : hasPreview
-                      ? 'Preview it above, then open AR.'
-                      : 'Upload or capture an image for a 3D preview and AR placement.'}
-                  </small>
-                </div>
-                <div className="action-row">
-                  <label className="image-action upload-choice primary-choice">
-                    <span className="choice-icon upload-choice-icon" aria-hidden="true" />
-                    <span>
-                      <strong>Upload Image</strong>
-                      <small>Choose from gallery</small>
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      disabled={loading}
-                    />
-                  </label>
-                  <button type="button" className="image-action upload-choice secondary-choice" onClick={handleCameraOpen}>
-                    <span className="choice-icon camera-choice-icon" aria-hidden="true" />
-                    <span>
-                      <strong>Live Capture</strong>
-                      <small>Use your camera</small>
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {cameraOpen && (
-                <div className="camera-panel">
-                  <video ref={videoRef} className="camera-preview" playsInline muted />
-                  <canvas ref={canvasRef} className="camera-canvas" />
-                  <div className="camera-actions">
-                    <button type="button" className="camera-capture" onClick={handleCameraCapture}>
-                      Capture
-                    </button>
-                    <button type="button" className="camera-close" onClick={stopCamera}>
-                      Cancel
+                <div className={`upload-card ${loading ? 'is-disabled' : ''}`}>
+                  <div className="upload-copy">
+                    <strong>{models.length ? 'Add another design image' : 'Upload your design image'}</strong>
+                    <small>
+                      {models.length
+                        ? 'Add more models, select them below, then open the combined AR scene.'
+                        : 'Upload or capture an image for a 3D preview and AR placement.'}
+                    </small>
+                  </div>
+                  <div className="action-row">
+                    <label className="image-action upload-choice primary-choice">
+                      <span className="choice-icon upload-choice-icon" aria-hidden="true" />
+                      <span>
+                        <strong>Upload Image</strong>
+                        <small>Choose from gallery</small>
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        disabled={loading}
+                      />
+                    </label>
+                    <button type="button" className="image-action upload-choice secondary-choice" onClick={handleCameraOpen}>
+                      <span className="choice-icon camera-choice-icon" aria-hidden="true" />
+                      <span>
+                        <strong>Live Capture</strong>
+                        <small>Use your camera</small>
+                      </span>
                     </button>
                   </div>
                 </div>
-              )}
 
-              {imageFile && (
-                <div className="preview-card">
-                  <img src={imagePreviewUrl} alt="Uploaded image preview" />
+                {cameraOpen && (
+                  <div className="camera-panel">
+                    <video ref={videoRef} className="camera-preview" playsInline muted />
+                    <canvas ref={canvasRef} className="camera-canvas" />
+                    <div className="camera-actions">
+                      <button type="button" className="camera-capture" onClick={handleCameraCapture}>
+                        Capture
+                      </button>
+                      <button type="button" className="camera-close" onClick={stopCamera}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {imageFile && (
+                  <div className="preview-card">
+                    <img src={imagePreviewUrl} alt="Uploaded image preview" />
+                    <div>
+                      <span>Latest image</span>
+                      <strong>{imageFile.name}</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {models.length > 0 && (
+              <section className="scene-panel" aria-label="Scene models">
+                <div className="scene-heading">
                   <div>
-                    <span>Selected image</span>
-                    <strong>{imageFile.name}</strong>
+                    <span>Scene models</span>
+                    <strong>
+                      {selectedModelCount}/{models.length} selected
+                    </strong>
                   </div>
+                  <span className="scene-badge">{selectedModelCount > 1 ? 'Combined GLB' : 'Single GLB'}</span>
                 </div>
-              )}
-              </div>
+
+                <div className="model-list">
+                  {models.map((model, index) => (
+                    <article className={`model-card ${model.selected ? 'is-selected' : ''}`} key={model.id}>
+                      <label className="model-select-row">
+                        <input
+                          type="checkbox"
+                          checked={model.selected}
+                          onChange={() => toggleModelSelection(model.id)}
+                        />
+                        <img src={model.imageUrl} alt={`Source for ${model.name}`} />
+                        <span>
+                          <small>Model {index + 1}</small>
+                          <strong>{model.name}</strong>
+                        </span>
+                      </label>
+
+                      <div className="metadata-grid" aria-label={`${model.name} metadata`}>
+                        <span>W {formatMetric(model.metadata.normalizedDimensions.x)}</span>
+                        <span>H {formatMetric(model.metadata.normalizedDimensions.y)}</span>
+                        <span>D {formatMetric(model.metadata.normalizedDimensions.z)}</span>
+                        <span>Scale {formatScale(model.metadata.scaleFactor)}</span>
+                        <span>Floor {formatSignedMetric(model.metadata.floorOffset)}</span>
+                      </div>
+
+                      <div className="model-card-footer">
+                        <span>{model.createdAt}</span>
+                        <button type="button" onClick={() => removeModel(model.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             )}
 
             <div className="status-strip" role="status">
@@ -527,19 +796,25 @@ export default function App() {
                   Generating 3D model...
                 </>
               )}
+              {sceneBuilding && !loading && (
+                <>
+                  <span className="status-dot is-loading" />
+                  Combining selected models...
+                </>
+              )}
               {error && (
                 <>
                   <span className="status-dot is-error" />
                   {error}
                 </>
               )}
-              {modelUrl && !loading && (
+              {modelUrl && !loading && !sceneBuilding && (
                 <>
                   <span className="status-dot is-ready" />
-                  Model ready for 3D and AR viewing.
+                  {selectedModelCount > 1 ? 'Combined scene ready for AR viewing.' : 'Model ready for 3D and AR viewing.'}
                 </>
               )}
-              {!loading && !error && !glbBlob && (
+              {!loading && !sceneBuilding && !error && models.length === 0 && (
                 <>
                   <span className="status-dot" />
                   Waiting for an image.
@@ -576,6 +851,30 @@ export default function App() {
           </section>
         </section>
       </div>
+
+      {arGuideOpen && (
+        <div className="ar-guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="ar-guide-title">
+          <div className="ar-guide-modal">
+            <div className="ar-guide-header">
+              <span>AR placement</span>
+              <strong id="ar-guide-title">{sceneTitle}</strong>
+            </div>
+            <div className="ar-guide-steps">
+              <span>Scan the floor slowly until the placement marker appears.</span>
+              <span>Tap once to place the scene on the surface.</span>
+              <span>Use two fingers to resize or rotate, then walk around the model.</span>
+            </div>
+            <div className="ar-guide-actions">
+              <button type="button" className="image-action secondary-action" onClick={() => setArGuideOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="image-action primary-action" onClick={handleStartAr}>
+                Start AR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
