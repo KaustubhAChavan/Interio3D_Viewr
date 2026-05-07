@@ -13,6 +13,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modelScale, setModelScale] = useState('1 1 1');
+  const [placementLocked, setPlacementLocked] = useState(true);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [snapshots, setSnapshots] = useState(() => {
@@ -37,6 +38,7 @@ export default function App() {
   const modelUrl = publicModelUrl || objectModelUrl;
   const hasNativeRoomAnchor = Boolean(publicModelUrl?.startsWith('https://'));
   const arModes = hasNativeRoomAnchor ? 'scene-viewer webxr quick-look' : 'webxr quick-look';
+  const arScale = placementLocked ? 'fixed' : 'auto';
 
   const imagePreviewUrl = useMemo(() => {
     if (!imageFile) return null;
@@ -123,6 +125,7 @@ export default function App() {
     setLoading(false);
     setError(null);
     setModelScale('1 1 1');
+    setPlacementLocked(true);
     setCameraStream(null);
     setCameraOpen(false);
   };
@@ -143,6 +146,7 @@ export default function App() {
     setGlbBlob(null);
     setPublicModelUrl(null);
     setModelScale('1 1 1');
+    setPlacementLocked(true);
 
     try {
       const formData = new FormData();
@@ -389,8 +393,9 @@ export default function App() {
                     onLoad={handleModelLoad}
                     ar
                     ar-modes={arModes}
-                    ar-scale="auto"
+                    ar-scale={arScale}
                     ar-placement="floor"
+                    ar-placement-lock={placementLocked ? 'locked' : 'move'}
                     camera-controls
                     shadow-intensity="1"
                     shadow-softness="0.8"
@@ -400,7 +405,7 @@ export default function App() {
                     style={{ width: '100%', height: '100%' }}
                   >
                     <button slot="ar-button" className="ar-button">
-                      Place & Lock in Room
+                      {placementLocked ? 'Place & Lock in Room' : 'Move in Room'}
                     </button>
                   </model-viewer>
                 ) : (
@@ -416,19 +421,40 @@ export default function App() {
 
               {modelUrl && (
                 <div className="viewer-actions">
+                  <div className="placement-mode" role="group" aria-label="AR placement mode">
+                    <button
+                      type="button"
+                      className={`placement-mode-button ${placementLocked ? 'is-active' : ''}`}
+                      onClick={() => setPlacementLocked(true)}
+                    >
+                      Locked
+                    </button>
+                    <button
+                      type="button"
+                      className={`placement-mode-button ${!placementLocked ? 'is-active' : ''}`}
+                      onClick={() => setPlacementLocked(false)}
+                    >
+                      Move
+                    </button>
+                  </div>
                   <div className="viewer-action-row">
                     <button type="button" className="image-action primary-action" onClick={handleViewAr}>
-                      Place & Lock in Room
+                      {placementLocked ? 'Place & Lock in Room' : 'Move in Room'}
                     </button>
                     <button type="button" className="image-action secondary-action" onClick={handleSaveSnapshot}>
                       Save snapshot
                     </button>
                   </div>
                   <p className="ar-placement-note">
-                    {hasNativeRoomAnchor
-                      ? 'Place the model, adjust size with two fingers, then walk around it. One-finger dragging is locked to keep the anchor still.'
-                      : 'Browser AR fallback is active. For fixed Android room anchoring, the generated model must come from a public HTTPS URL.'}
+                    {placementLocked
+                      ? 'Locked mode keeps the object fixed after placement. Switch to Move only when you want to reposition it.'
+                      : 'Move mode allows one-finger repositioning before you lock the model again.'}
                   </p>
+                  {!hasNativeRoomAnchor && (
+                    <p className="ar-placement-note is-warning">
+                      Public HTTPS model URLs give the most stable Android room anchor.
+                    </p>
+                  )}
                 </div>
               )}
             </section>

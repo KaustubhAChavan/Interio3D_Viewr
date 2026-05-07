@@ -7,24 +7,37 @@ const files = [
   join('node_modules', '.vite', 'deps', '@google_model-viewer.js'),
 ];
 
-const translationStartPattern =
-  /([ \t]*)if \(hitPosition != null\) \{\r?\n([ \t]*)this\.isTranslating = true;\r?\n[ \t]*this\.lastDragPosition\.copy\(hitPosition\);\r?\n([ \t]*)\}\r?\n([ \t]*)else if \(this\.placeOnWall === false\) \{/g;
-const alreadyLockedPattern =
-  /if \(hitPosition != null\) \{\r?\n[ \t]*box\.show = false;\r?\n[ \t]*this\.isTranslating = false;/;
+const placementBlockPattern =
+  /(?<prefix>[ \t]*const (?<hitVar>hitPosition\w*) = box\.getHit\(this\.presentedScene!?, axes\[0\], axes\[1\]\);\r?\n[ \t]*box\.show = true;\r?\n(?:\r?\n)?)(?<ifIndent>[ \t]*)if \(\k<hitVar> != null\) \{\r?\n(?:[ \t]*box\.show = false;\r?\n[ \t]*this\.isTranslating = false;|[ \t]*this\.isTranslating = true;\r?\n[ \t]*this\.lastDragPosition\.copy\(\k<hitVar>\);)\r?\n[ \t]*\}\s*(?<elseIndent>[ \t]*)else if \(this\.placeOnWall === false\) \{/g;
 
-function lockOneFingerTranslation(source) {
+const alreadyDynamicPattern =
+  /const lockPlacement = this\.presentedScene\?\.element\?\.getAttribute\('ar-placement-lock'\) !== 'move';/;
+
+function dynamicPlacementLock(source) {
   const newline = source.includes('\r\n') ? '\r\n' : '\n';
   let replacements = 0;
 
   const patched = source.replace(
-    translationStartPattern,
-    (_match, ifIndent, bodyIndent, closeIndent, elseIndent) => {
+    placementBlockPattern,
+    (...args) => {
       replacements += 1;
+      const groups = args.at(-1);
+      const { prefix, hitVar, ifIndent, elseIndent } = groups;
+      const childIndent = `${ifIndent}${ifIndent.length >= 12 ? '    ' : '  '}`;
+      const grandchildIndent = `${childIndent}${ifIndent.length >= 12 ? '    ' : '  '}`;
+
       return [
-        `${ifIndent}if (hitPosition != null) {`,
-        `${bodyIndent}box.show = false;`,
-        `${bodyIndent}this.isTranslating = false;`,
-        `${closeIndent}}`,
+        prefix.trimEnd(),
+        `${ifIndent}const lockPlacement = this.presentedScene?.element?.getAttribute('ar-placement-lock') !== 'move';`,
+        `${ifIndent}if (${hitVar} != null) {`,
+        `${childIndent}if (lockPlacement) {`,
+        `${grandchildIndent}box.show = false;`,
+        `${grandchildIndent}this.isTranslating = false;`,
+        `${childIndent}} else {`,
+        `${grandchildIndent}this.isTranslating = true;`,
+        `${grandchildIndent}this.lastDragPosition.copy(${hitVar});`,
+        `${childIndent}}`,
+        `${ifIndent}}`,
         `${elseIndent}else if (this.placeOnWall === false) {`,
       ].join(newline);
     },
@@ -37,14 +50,18 @@ for (const file of files) {
   if (!existsSync(file)) continue;
 
   const source = readFileSync(file, 'utf8');
-  const { patched, replacements } = lockOneFingerTranslation(source);
+
+  if (alreadyDynamicPattern.test(source)) {
+    console.log(`Dynamic AR placement lock already applied in ${file}`);
+    continue;
+  }
+
+  const { patched, replacements } = dynamicPlacementLock(source);
 
   if (patched !== source) {
     writeFileSync(file, patched);
-    console.log(`Patched AR object translation lock in ${file} (${replacements} replacement${replacements === 1 ? '' : 's'})`);
-  } else if (alreadyLockedPattern.test(source)) {
-    console.log(`AR object translation lock already applied in ${file}`);
+    console.log(`Patched dynamic AR placement lock in ${file} (${replacements} replacement${replacements === 1 ? '' : 's'})`);
   } else {
-    console.warn(`AR object translation lock pattern was not found in ${file}`);
+    console.warn(`Dynamic AR placement lock pattern was not found in ${file}`);
   }
 }
