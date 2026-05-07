@@ -505,15 +505,13 @@ h1 {
 
 .image-action:hover,
 .toolbar-ar-button:hover,
-.toolbar-home-button:hover,
-.ar-button:hover {
+.toolbar-home-button:hover {
   transform: translateY(-1px);
 }
 
 .image-action:active,
 .toolbar-ar-button:active,
-.toolbar-home-button:active,
-.ar-button:active {
+.toolbar-home-button:active {
   transform: translateY(0);
   filter: brightness(0.98);
 }
@@ -636,6 +634,10 @@ h1 {
   line-height: 1.25;
 }
 
+.top-status-strip {
+  order: -1;
+}
+
 .status-dot {
   width: 10px;
   height: 10px;
@@ -752,6 +754,10 @@ h1 {
   z-index: 1;
 }
 
+.viewer-hidden-ar-button {
+  display: none;
+}
+
 .viewer-surface::before {
   content: "";
   position: absolute;
@@ -812,22 +818,6 @@ h1 {
   border-top-color: #247c73;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-}
-
-.ar-button {
-  position: absolute;
-  left: 50%;
-  bottom: max(14px, env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  min-width: 132px;
-  border: 0;
-  border-radius: 8px;
-  padding: 13px 18px;
-  background: linear-gradient(135deg, #e86f5b, #247c73);
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 900;
-  box-shadow: 0 18px 34px rgba(36, 124, 115, 0.24);
 }
 
 .viewer-actions {
@@ -1636,6 +1626,10 @@ h1 {
 }
 
 @media (min-width: 820px) {
+  .ar-action-button {
+    display: none;
+  }
+
   .design-app {
     display: grid;
     place-items: center;

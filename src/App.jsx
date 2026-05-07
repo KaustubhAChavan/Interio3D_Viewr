@@ -724,7 +724,7 @@ export default function App() {
                 setQrOpen(true);
               }}
             >
-              Phone QR
+              App QR
             </button>
             <div className={`header-status is-${statusTone}`} aria-live="polite">
               <span />
@@ -789,17 +789,7 @@ export default function App() {
                     interaction-prompt="none"
                     style={{ width: '100%', height: '100%' }}
                   >
-                    <button
-                      slot="ar-button"
-                      className="ar-button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        handleViewAr();
-                      }}
-                    >
-                      View in AR
-                    </button>
+                    <button slot="ar-button" className="viewer-hidden-ar-button" aria-hidden="true" tabIndex="-1" />
                   </model-viewer>
                 ) : (
                   <div className="pending-preview">
@@ -815,7 +805,7 @@ export default function App() {
               {modelUrl && (
                 <div className="viewer-actions">
                   <div className="viewer-action-row">
-                    <button type="button" className="image-action primary-action" onClick={handleViewAr}>
+                    <button type="button" className="image-action primary-action ar-action-button" onClick={handleViewAr}>
                       View in AR
                     </button>
                     <button type="button" className="image-action secondary-action" onClick={handleSaveSnapshot}>
@@ -832,7 +822,7 @@ export default function App() {
                         setQrOpen(true);
                       }}
                     >
-                      Phone QR
+                      App QR
                     </button>
                   </div>
                   <p className="ar-placement-note">
@@ -848,6 +838,39 @@ export default function App() {
           )}
 
           <section className="studio-panel" aria-label="Interior AI designer controls">
+            <div className="status-strip top-status-strip" role="status">
+              {loading && (
+                <>
+                  <span className="status-dot is-loading" />
+                  Generating 3D model...
+                </>
+              )}
+              {sceneBuilding && !loading && (
+                <>
+                  <span className="status-dot is-loading" />
+                  Combining selected models...
+                </>
+              )}
+              {error && (
+                <>
+                  <span className="status-dot is-error" />
+                  {error}
+                </>
+              )}
+              {modelUrl && !loading && !sceneBuilding && (
+                <>
+                  <span className="status-dot is-ready" />
+                  {selectedModelCount > 1 ? 'Combined scene ready for AR viewing.' : 'Model ready for 3D and AR viewing.'}
+                </>
+              )}
+              {!loading && !sceneBuilding && !error && models.length === 0 && (
+                <>
+                  <span className="status-dot" />
+                  Waiting for an image.
+                </>
+              )}
+            </div>
+
             <div className="placia-hero">
               <div className="placia-title-block">
                 <div className="placia-lockup">
@@ -1029,39 +1052,6 @@ export default function App() {
               </section>
             )}
 
-            <div className="status-strip" role="status">
-              {loading && (
-                <>
-                  <span className="status-dot is-loading" />
-                  Generating 3D model...
-                </>
-              )}
-              {sceneBuilding && !loading && (
-                <>
-                  <span className="status-dot is-loading" />
-                  Combining selected models...
-                </>
-              )}
-              {error && (
-                <>
-                  <span className="status-dot is-error" />
-                  {error}
-                </>
-              )}
-              {modelUrl && !loading && !sceneBuilding && (
-                <>
-                  <span className="status-dot is-ready" />
-                  {selectedModelCount > 1 ? 'Combined scene ready for AR viewing.' : 'Model ready for 3D and AR viewing.'}
-                </>
-              )}
-              {!loading && !sceneBuilding && !error && models.length === 0 && (
-                <>
-                  <span className="status-dot" />
-                  Waiting for an image.
-                </>
-              )}
-            </div>
-
             {snapshots.length > 0 && (
               <section className="snapshots-panel" aria-label="Saved snapshots">
                 <div className="snapshots-heading">
@@ -1120,15 +1110,15 @@ export default function App() {
         <div className="ar-guide-backdrop" role="dialog" aria-modal="true" aria-labelledby="qr-guide-title">
           <div className="ar-guide-modal qr-modal">
             <div className="ar-guide-header">
-              <span>Phone handoff</span>
-              <strong id="qr-guide-title">Open Placia on phone</strong>
+              <span>App link</span>
+              <strong id="qr-guide-title">Open Placia</strong>
             </div>
 
             <div className="qr-frame">
               <img src={qrImageUrl} alt="QR code for opening this website on a phone" />
             </div>
             <textarea className="share-link-field" value={websiteUrl} readOnly aria-label="Phone handoff link" />
-            <p className="qr-helper">Scan this on your phone, then upload or capture the image again there.</p>
+            <p className="qr-helper">Scan or copy this link to open the same website in another browser.</p>
             {copyStatus && <p className="qr-status">{copyStatus}</p>}
             <div className="ar-guide-actions">
               <button type="button" className="image-action secondary-action" onClick={() => setQrOpen(false)}>
